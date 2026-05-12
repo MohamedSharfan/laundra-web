@@ -31,11 +31,13 @@ type Props = {
 const statusLabels: Record<string, { label: string; progress: number }> = {
   booking_placed: { label: "Booking placed", progress: 0.1 },
   rider_assigned: { label: "Rider assigned", progress: 0.25 },
-  pickup_en_route: { label: "Rider en route", progress: 0.4 },
+  rider_arriving: { label: "Rider en route", progress: 0.4 },
   picked_up: { label: "Picked up", progress: 0.6 },
-  processing: { label: "Processing", progress: 0.75 },
+  washing_started: { label: "Washing", progress: 0.7 },
+  ironing: { label: "Ironing", progress: 0.8 },
   out_for_delivery: { label: "Out for delivery", progress: 0.9 },
   delivered: { label: "Delivered", progress: 1 },
+  canceled: { label: "Canceled", progress: 0 },
 };
 
 function getStatusMeta(status?: string | null) {
@@ -132,6 +134,7 @@ export default function CustomerTrackingMap({ bookingId }: Props) {
   }, [booking]);
 
   const statusMeta = useMemo(() => getStatusMeta(booking?.status), [booking?.status]);
+  const isWaiting = booking?.status === "booking_placed";
   const boundsPoints = useMemo(() => {
     const points: LatLng[] = [];
     if (pickup) points.push(pickup);
@@ -191,6 +194,35 @@ export default function CustomerTrackingMap({ bookingId }: Props) {
             {routeInfo ? formatDistance(routeInfo.distance) : "Route loading"}
           </div>
         </div>
+
+        {isWaiting && (
+          <div
+            style={{
+              position: "absolute",
+              top: 16,
+              right: 16,
+              padding: "10px 12px",
+              border: "2px solid var(--black)",
+              background: "#fff3c4",
+              fontFamily: "Space Grotesk",
+              fontWeight: 800,
+              textTransform: "uppercase",
+              fontSize: 11,
+              letterSpacing: "0.08em",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              boxShadow: "4px 4px 0 0 var(--black)",
+            }}
+          >
+            Finding rider
+            <span className="loading-dots yellow" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </span>
+          </div>
+        )}
 
         <BaseMap center={center} boundsPoints={boundsPoints}>
           {route.length > 0 && (

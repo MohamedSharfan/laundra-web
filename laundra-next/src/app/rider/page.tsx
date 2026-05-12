@@ -2,76 +2,175 @@
 
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import LaundraRouteLoader from "@/components/LaundraRouteLoader";
+import { isAuthBypassEnabled } from "@/lib/auth-bypass";
+import { useSupabaseUser } from "@/lib/supabase/session";
 
 function formatLKR(amount: number) {
   return `Rs. ${amount.toLocaleString("en-LK")}`;
 }
 
-type Job = {
-  type: string;
-  price: number;
-  pickup: string;
-  dropoff: string;
-  shadow: "shadow-blue" | "shadow-red" | "shadow-yellow";
+type BookingJob = {
+  id: string;
+  service_type: string | null;
+  pickup_address: string | null;
+  pickup_city: string | null;
+  total_lkr: number | null;
+  scheduled_date: string | null;
+  scheduled_window: string | null;
+  status: string | null;
 };
 
 const RiderOperationsMap = dynamic(() => import("@/components/maps/RiderOperationsMap"), {
   ssr: false,
-  loading: () => (
-    <div className="map-shell" style={{ padding: 24 }}>
-      <div style={{ fontFamily: "Space Grotesk", fontWeight: 800, textTransform: "uppercase" }}>
-        Loading map…
-      </div>
-    </div>
-  ),
+  loading: () => <LaundraRouteLoader title="Map" subtitle="Loading route map…" variant="compact" />,
 });
 
 export default function RiderPage() {
-  const jobs = useMemo<Job[]>(
-    () => [
-      {
-        type: "Express Wash",
-        price: 4850,
-        pickup: "No. 412, West End Ave, Colombo 03",
-        dropoff: "Laundra Hub · Kollupitiya",
-        shadow: "shadow-blue",
-      },
-      {
-        type: "Bulk Order",
-        price: 8250,
-        pickup: "No. 88, Galle Road, Dehiwala",
-        dropoff: "Laundra Hub · Dehiwala",
-        shadow: "shadow-red",
-      },
-      {
-        type: "Standard",
-        price: 3350,
-        pickup: "No. 150, Baseline Rd, Borella",
-        dropoff: "Laundra Hub · Borella",
-        shadow: "shadow-yellow",
-      },
-      {
-        type: "Dry Clean",
-        price: 6200,
-        pickup: "No. 22, Park St, Colombo 02",
-        dropoff: "Laundra Hub · Slave Island",
-        shadow: "shadow-blue",
-      },
-    ],
-    [],
-  );
+  const { supabase, user, profile, loading: authLoading } = useSupabaseUser();
+  const router = useRouter();
+  const [navHash, setNavHash] = useState("");
+  const [jobs, setJobs] = useState<BookingJob[]>([]);
+  const [accepted, setAccepted] = useState<Record<string, boolean>>({});
+  const [accepting, setAccepting] = useState<Record<string, boolean>>({});
+  const [toast, setToast] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const [accepted, setAccepted] = useState<Record<number, boolean>>({});
+  useEffect(() => {
+    if (authLoading || isAuthBypassEnabled()) return;
+    if (!user) {
+      router.replace("/login/rider");
+      return;
+    }
+    if (profile?.role === "customer") {
+      router.replace("/customer");
+    }
+  }, [authLoading, user, profile?.role, router]);
+
+  useEffect(() => {
+    if (!supabase) return;
+    if (authLoading) return;
+
+    if (isAuthBypassEnabled() && !user) {
+      setLoading(false);
+      setJobs([]);
+      setError(null);
+      return;
+    }
+
+    if (!isAuthBypassEnabled() && !user) {
+      return;
+    }
+
+    const fetchJobs = async () => {
+      setLoading(true);
+      setError(null);
+      const { data, error: loadError } = await supabase
+        .from("bookings")
+        .select(
+          "id,service_type,pickup_address,pickup_city,total_lkr,scheduled_date,scheduled_window,status",
+        )
+        .eq("status", "booking_placed")
+        .is("rider_id", null)
+        .order("created_at", { ascending: false });
+
+      if (loadError) {
+        setError(loadError.message);
+        setJobs([]);
+      } else {
+        setJobs((data ?? []) as BookingJob[]);
+      }
+      setLoading(false);
+    };
+
+    fetchJobs();
+    const channel = supabase
+      .channel("rider-available-bookings")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "bookings" },
+        () => fetchJobs(),
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [supabase, user, authLoading]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), 3200);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  useEffect(() => {
+    const syncHash = () => setNavHash(typeof window !== "undefined" ? window.location.hash.slice(1) : "");
+    syncHash();
+    window.addEventListener("hashchange", syncHash);
+    return () => window.removeEventListener("hashchange", syncHash);
+  }, []);
   const nearbyOrders = useMemo(
     () =>
       jobs.map((job) => ({
-        label: job.type,
-        pickup: job.pickup,
-        city: job.pickup.split(",").slice(-1)[0]?.trim() || "Colombo",
+        label: job.service_type ?? "Booking",
+        pickup: job.pickup_address ?? "Pickup address pending",
+        city: job.pickup_city || "Colombo",
       })),
     [jobs],
   );
+
+  const handleAccept = async (job: BookingJob) => {
+    if (!supabase || !user) return;
+    setAccepting((prev) => ({ ...prev, [job.id]: true }));
+    setError(null);
+
+    const { error: updateError } = await supabase
+      .from("bookings")
+      .update({ rider_id: user.id, status: "rider_assigned" })
+      .eq("id", job.id);
+
+    if (updateError) {
+      setError(updateError.message);
+      setAccepting((prev) => ({ ...prev, [job.id]: false }));
+      return;
+    }
+
+    const { error: eventError } = await supabase.from("booking_events").insert({
+      booking_id: job.id,
+      status: "rider_assigned",
+      note: "Rider accepted the booking.",
+    });
+
+    if (eventError) {
+      setError(eventError.message);
+    }
+
+    setAccepted((prev) => ({ ...prev, [job.id]: true }));
+    setAccepting((prev) => ({ ...prev, [job.id]: false }));
+    setToast("Job accepted successfully.");
+  };
+
+  const bypass = isAuthBypassEnabled();
+
+  if (!bypass && authLoading) {
+    return (
+      <div id="page-rider-loading" className="page-section active">
+        <LaundraRouteLoader title="Rider portal" subtitle="Preparing your workspace…" />
+      </div>
+    );
+  }
+
+  if (!bypass && !authLoading && !user) {
+    return (
+      <div id="page-rider-auth" className="page-section active">
+        <LaundraRouteLoader title="Rider portal" subtitle="Redirecting to sign in…" />
+      </div>
+    );
+  }
 
   return (
     <div id="page-rider" className="page-section active">
@@ -81,30 +180,101 @@ export default function RiderPage() {
           <Link className="sidebar-link" href="/">
             <span className="material-symbols-outlined">arrow_back</span> Back to Site
           </Link>
-          <button className="sidebar-link active" type="button">
+          <a
+            className={`sidebar-link ${!navHash || navHash === "rider-stats" ? "active" : ""}`}
+            href="#rider-stats"
+          >
             <span className="material-symbols-outlined">grid_view</span> Dashboard
-          </button>
-          <button className="sidebar-link" type="button">
-            <span className="material-symbols-outlined">list_alt</span> Available Jobs
-          </button>
-          <button className="sidebar-link" type="button">
+          </a>
+          <a
+            className={`sidebar-link ${navHash === "rider-route" ? "active" : ""}`}
+            href="#rider-route"
+          >
             <span className="material-symbols-outlined">map</span> My Route
-          </button>
-          <button className="sidebar-link" type="button">
+          </a>
+          <a
+            className={`sidebar-link ${navHash === "rider-jobs" ? "active" : ""}`}
+            href="#rider-jobs"
+          >
+            <span className="material-symbols-outlined">list_alt</span> Available Jobs
+          </a>
+          <a
+            className={`sidebar-link ${navHash === "rider-history" ? "active" : ""}`}
+            href="#rider-history"
+          >
             <span className="material-symbols-outlined">history</span> History
-          </button>
-          <button className="sidebar-link" type="button">
+          </a>
+          <a
+            className={`sidebar-link ${navHash === "rider-earnings" ? "active" : ""}`}
+            href="#rider-earnings"
+          >
             <span className="material-symbols-outlined">payments</span> Earnings
-          </button>
-          <button className="sidebar-link" type="button" style={{ marginTop: "auto" }}>
+          </a>
+          <a
+            className={`sidebar-link ${navHash === "rider-settings" ? "active" : ""}`}
+            href="#rider-settings"
+            style={{ marginTop: "auto" }}
+          >
             <span className="material-symbols-outlined">settings</span> Settings
-          </button>
+          </a>
         </aside>
 
         <main className="dash-main">
           <div className="dash-header">Rider Portal</div>
 
-          <div className="stat-grid">
+          {toast && (
+            <div
+              style={{
+                marginBottom: 18,
+                border: "3px solid var(--black)",
+                background: "var(--yellow)",
+                boxShadow: "6px 6px 0 0 var(--black)",
+                padding: "12px 16px",
+                fontFamily: "Space Grotesk",
+                fontWeight: 900,
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+              }}
+            >
+              {toast}
+            </div>
+          )}
+
+          {toast && (
+            <div
+              style={{
+                marginBottom: 18,
+                border: "3px solid var(--black)",
+                background: "var(--yellow)",
+                padding: "12px 16px",
+                fontFamily: "Space Grotesk",
+                fontWeight: 800,
+                fontSize: 11,
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+              }}
+            >
+              Preview mode: navbar & screens work · jobs need a signed-in rider account
+            </div>
+          )}
+
+          {error && (
+            <div
+              style={{
+                marginBottom: 18,
+                border: "3px solid var(--black)",
+                background: "#ffe5e5",
+                boxShadow: "6px 6px 0 0 var(--black)",
+                padding: "12px 16px",
+                fontFamily: "Space Grotesk",
+                fontWeight: 800,
+              }}
+            >
+              {error}
+            </div>
+          )}
+
+          <div className="stat-grid" id="rider-stats" style={{ scrollMarginTop: 100 }}>
             <div
               className="stat-card"
               style={{
@@ -127,6 +297,7 @@ export default function RiderPage() {
             </div>
             <div
               className="stat-card"
+              id="rider-earnings"
               style={{
                 background: "white",
                 borderColor: "var(--black)",
@@ -157,6 +328,7 @@ export default function RiderPage() {
           </div>
 
           <div
+            id="rider-jobs"
             style={{
               display: "flex",
               justifyContent: "space-between",
@@ -164,6 +336,7 @@ export default function RiderPage() {
               marginBottom: 24,
               borderBottom: "4px solid var(--primary)",
               paddingBottom: 12,
+              scrollMarginTop: 100,
             }}
           >
             <h3
@@ -197,7 +370,7 @@ export default function RiderPage() {
             </div>
           </div>
 
-          <div style={{ marginBottom: 32 }}>
+          <div id="rider-route" style={{ marginBottom: 32, scrollMarginTop: 100 }}>
             <div
               style={{
                 fontFamily: "Space Grotesk",
@@ -213,11 +386,23 @@ export default function RiderPage() {
             <RiderOperationsMap nearbyOrders={nearbyOrders} />
           </div>
 
-          <div className="jobs-grid" id="jobsGrid">
-            {jobs.map((job, i) => {
-              const isAccepted = !!accepted[i];
+          <div className="jobs-grid" id="jobsGrid" style={{ scrollMarginTop: 100 }}>
+            {loading && (
+              <div style={{ fontFamily: "Space Grotesk", fontWeight: 800 }}>
+                Loading jobs...
+              </div>
+            )}
+            {!loading && jobs.length === 0 && (
+              <div style={{ fontFamily: "Space Grotesk", fontWeight: 800 }}>
+                No available jobs right now.
+              </div>
+            )}
+            {jobs.map((job) => {
+              const isAccepted = !!accepted[job.id];
+              const isAccepting = !!accepting[job.id];
+              const shadow = job.status === "booking_placed" ? "shadow-blue" : "shadow-yellow";
               return (
-                <div className={`job-card ${job.shadow}`} key={i}>
+                <div className={`job-card ${shadow}`} key={job.id}>
                   <div
                     style={{
                       display: "flex",
@@ -226,8 +411,10 @@ export default function RiderPage() {
                       marginBottom: 16,
                     }}
                   >
-                    <div className="job-type-badge">{job.type}</div>
-                    <div className="job-price">{formatLKR(job.price)}</div>
+                    <div className="job-type-badge">{job.service_type ?? "Laundry"}</div>
+                    <div className="job-price">
+                      {formatLKR(job.total_lkr ?? 0)}
+                    </div>
                   </div>
                   <div className="job-route">
                     <div className="job-point">
@@ -241,7 +428,9 @@ export default function RiderPage() {
                       </div>
                       <div>
                         <div className="job-point-label">Pickup</div>
-                        <div className="job-point-addr">{job.pickup}</div>
+                        <div className="job-point-addr">
+                          {job.pickup_address ?? "Pickup address pending"}
+                        </div>
                       </div>
                     </div>
                     <div
@@ -249,7 +438,6 @@ export default function RiderPage() {
                         width: 2,
                         height: 20,
                         background: "var(--primary)",
-                        marginLeft: 15,
                       }}
                     />
                     <div className="job-point">
@@ -258,23 +446,41 @@ export default function RiderPage() {
                       </div>
                       <div>
                         <div className="job-point-label">Drop-off</div>
-                        <div className="job-point-addr">{job.dropoff}</div>
+                        <div className="job-point-addr">
+                          Laundra Hub · {job.pickup_city ?? "Colombo"}
+                        </div>
                       </div>
                     </div>
                   </div>
+                  {(job.scheduled_date || job.scheduled_window) && (
+                    <div
+                      style={{
+                        marginTop: 12,
+                        fontFamily: "Space Grotesk",
+                        fontWeight: 800,
+                        fontSize: 11,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.08em",
+                        opacity: 0.7,
+                      }}
+                    >
+                      {job.scheduled_date}{" "}
+                      {job.scheduled_window ? `· ${job.scheduled_window}` : ""}
+                    </div>
+                  )}
                   <div className="job-actions">
                     <button
                       className="btn-accept"
                       type="button"
-                      disabled={isAccepted}
-                      onClick={() => setAccepted((a) => ({ ...a, [i]: true }))}
+                      onClick={() => handleAccept(job)}
+                      disabled={!user || isAccepting || isAccepted}
                       style={
                         isAccepted
                           ? { background: "#00aa55", cursor: "default", transform: "none" }
                           : undefined
                       }
                     >
-                      {isAccepted ? "✓ Accepted!" : "Accept Job"}
+                      {isAccepted ? "✓ Accepted!" : isAccepting ? "Accepting..." : "Accept Job"}
                     </button>
                     <button className="btn-details" type="button">
                       Details
@@ -286,16 +492,50 @@ export default function RiderPage() {
           </div>
 
           <div
+            id="rider-history"
             style={{
               marginTop: 48,
-              background: "var(--primary)",
+              padding: "28px 24px",
+              border: "3px solid var(--black)",
+              background: "white",
+              boxShadow: "6px 6px 0 0 var(--black)",
+              scrollMarginTop: 100,
+            }}
+          >
+            <div className="config-title" style={{ marginBottom: 12 }}>
+              Job history
+            </div>
+            <p style={{ margin: 0, lineHeight: 1.6, opacity: 0.8, fontFamily: "Inter" }}>
+              Completed deliveries and past assignments will appear here as we connect payouts and ratings.
+            </p>
+          </div>
+
+          <div
+            id="rider-settings"
+            style={{
+              marginTop: 24,
+              padding: "28px 24px",
+              border: "3px solid var(--black)",
+              background: "#f5f5f5",
+              scrollMarginTop: 100,
+            }}
+          >
+            <div className="config-title" style={{ marginBottom: 12 }}>
+              Settings
+            </div>
+            <p style={{ margin: 0, lineHeight: 1.6, opacity: 0.8, fontFamily: "Inter" }}>
+              Rider profile, notifications, and payout preferences — wiring soon.
+            </p>
+          </div>
+
+          <div
+            style={{
+              marginTop: 48,
               border: "4px solid var(--black)",
               boxShadow: "var(--shadow-yellow)",
               padding: 40,
               display: "grid",
-              gridTemplateColumns: "1fr auto",
               gap: 24,
-              alignItems: "center",
             }}
           >
             <div>
@@ -323,9 +563,9 @@ export default function RiderPage() {
                 get weekly automatic payouts.
               </p>
             </div>
-            <button className="btn-yellow" type="button" style={{ whiteSpace: "nowrap" }}>
+            <Link className="btn-yellow" href="/login/rider" style={{ whiteSpace: "nowrap" }}>
               Join as Rider →
-            </button>
+            </Link>
           </div>
         </main>
       </div>

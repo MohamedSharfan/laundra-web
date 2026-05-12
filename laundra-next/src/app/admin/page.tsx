@@ -1,3 +1,5 @@
+"use client";
+
 import dynamic from "next/dynamic";
 
 const AdminOperationsMap = dynamic(() => import("@/components/maps/AdminOperationsMap"), {

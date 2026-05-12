@@ -3,12 +3,10 @@
 import { createClient } from "@supabase/supabase-js";
 import { getPublicEnv } from "@/lib/env";
 
-let supabaseInstance: ReturnType<typeof createClient> | null = null;
+let cachedClient: ReturnType<typeof createClient> | null = null;
 
 export function createSupabaseBrowserClient() {
-  if (supabaseInstance) {
-    return supabaseInstance;
-  }
+  if (cachedClient) return cachedClient;
 
   const env = getPublicEnv();
   if (env.NEXT_PUBLIC_SUPABASE_ANON_KEY === "missing") {
@@ -17,7 +15,7 @@ export function createSupabaseBrowserClient() {
     );
   }
 
-  supabaseInstance = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
+  cachedClient = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
@@ -30,6 +28,5 @@ export function createSupabaseBrowserClient() {
     },
   });
 
-  return supabaseInstance;
+  return cachedClient;
 }
-
