@@ -1,39 +1,44 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { createSupabaseBrowserClient } from "./browser";
 
 export function useSupabaseUser() {
-  const [supabase, setSupabase] = useState<SupabaseClient | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const supabaseRef = useRef<SupabaseClient | null>(null);
 
   useEffect(() => {
-    // Avoid initializing Supabase during prerender/build
-    setSupabase(createSupabaseBrowserClient());
-  }, []);
-
-  useEffect(() => {
-    if (!supabase) return;
     let mounted = true;
 
-    supabase.auth.getUser().then(({ data }) => {
-      if (!mounted) return;
-      setUser(data.user ?? null);
-      setLoading(false);
-    });
+    try {
+      const supabase = createSupabaseBrowserClient();
+      supabaseRef.current = supabase;
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-    });
+      supabase.auth.getUser().then(({ data }) => {
+        if (!mounted) return;
+        setUser(data.user ?? null);
+        setLoading(false);
+      });
 
-    return () => {
-      mounted = false;
-      sub.subscription.unsubscribe();
-    };
-  }, [supabase]);
+      const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+        if (!mounted) return;
+        setUser(session?.user ?? null);
+      });
 
-  return { supabase, user, loading };
+      return () => {
+        mounted = false;
+        sub.subscription.unsubscribe();
+      };
+    } catch (error) {
+      if (mounted) {
+        console.error("Failed to initialize Supabase:", error);
+        setLoading(false);
+      }
+    }
+  }, []);
+
+  return { supabase: supabaseRef.current, user, loading };
 }
 
