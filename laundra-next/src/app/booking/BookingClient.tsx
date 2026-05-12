@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
 import { z } from "zod";
+import LaundraRouteLoader from "@/components/LaundraRouteLoader";
+import { isAuthBypassEnabled } from "@/lib/auth-bypass";
 import { useSupabaseUser } from "@/lib/supabase/session";
 
 type Service = "wash" | "iron";
@@ -16,6 +18,11 @@ export default function BookingClient() {
   const router = useRouter();
   const search = useSearchParams();
   const initialPackage = (search.get("package") ?? "basic") as "basic" | "pro" | "luxury";
+  const bookingReturnPath = useMemo(() => {
+    const q = search.toString();
+    return q ? `/booking?${q}` : "/booking";
+  }, [search]);
+  const pickupScheduleRef = useRef<HTMLDivElement>(null);
 
   const { supabase, user, profile, loading: authLoading } = useSupabaseUser();
 
@@ -28,7 +35,6 @@ export default function BookingClient() {
     scent: false,
     express: false,
   });
-  const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -44,15 +50,19 @@ export default function BookingClient() {
   const [city] = useState("Colombo");
 
   useEffect(() => {
-    if (authLoading) return;
+    if (authLoading || isAuthBypassEnabled()) return;
     if (!user) {
-      router.replace("/auth?role=customer");
+      router.replace(`/login/customer?next=${encodeURIComponent(bookingReturnPath)}`);
       return;
     }
     if (profile?.role === "rider") {
       router.replace("/rider");
     }
-  }, [authLoading, user, profile?.role, router]);
+  }, [authLoading, user, profile?.role, router, bookingReturnPath]);
+
+  const bypass = isAuthBypassEnabled();
+  const authBlocked =
+    authLoading || (!user && !bypass) || (profile?.role === "rider" && !bypass);
 
   const pricing = useMemo(() => {
     const basePerKg = initialPackage === "pro" ? 650 : service === "wash" ? 450 : 250; // LKR per kg
@@ -105,7 +115,13 @@ export default function BookingClient() {
     if (authLoading) return;
 
     if (!user) {
-      router.push("/auth");
+      if (bypass) {
+        setSaveError(
+          "Auth bypass is on — unset NEXT_PUBLIC_LAUDRA_SKIP_AUTH and sign in to confirm bookings.",
+        );
+        return;
+      }
+      router.push(`/login/customer?next=${encodeURIComponent(bookingReturnPath)}`);
       return;
     }
     if (!supabase) {
@@ -158,8 +174,7 @@ export default function BookingClient() {
         created_by: user.id,
       });
 
-      setModalOpen(true);
-      setTimeout(() => router.push(`/customer?new=${inserted.id}`), 900);
+      router.replace(`/customer?new=${inserted.id}`);
     } catch (e: any) {
       setSaveError(e?.message ?? "Booking failed. Please try again.");
     } finally {
@@ -167,29 +182,55 @@ export default function BookingClient() {
     }
   };
 
+  if (authBlocked) {
+    return (
+      <div id="page-booking" className="page-section active">
+        <LaundraRouteLoader title="New booking" subtitle="Checking your session…" />
+      </div>
+    );
+  }
+
   return (
     <div id="page-booking" className="page-section active">
+      {bypass && (
+        <div
+          style={{
+            margin: "0 auto",
+            maxWidth: 900,
+            padding: "12px 16px",
+            borderBottom: "3px solid var(--black)",
+            background: "var(--yellow)",
+            fontFamily: "Space Grotesk",
+            fontWeight: 800,
+            fontSize: 11,
+            textTransform: "uppercase",
+            letterSpacing: "0.06em",
+          }}
+        >
+          Preview mode: sign-in gate disabled · bookings won&apos;t save until you authenticate
+        </div>
+      )}
       <div className="dashboard-layout">
         <aside className="sidebar">
           <div className="sidebar-brand">LAUNDRA</div>
           <Link className="sidebar-link" href="/">
             <span className="material-symbols-outlined">arrow_back</span> Back to Site
           </Link>
-          <button className="sidebar-link active" type="button">
+          <Link className="sidebar-link active" href={bookingReturnPath}>
             <span className="material-symbols-outlined">local_laundry_service</span> New Booking
-          </button>
-          <button className="sidebar-link" type="button">
+          </Link>
+          <Link className="sidebar-link" href="/customer#customer-orders">
             <span className="material-symbols-outlined">map</span> Track Order
-          </button>
-          <button className="sidebar-link" type="button">
+          </Link>
+          <Link className="sidebar-link" href="/customer#customer-orders">
             <span className="material-symbols-outlined">history</span> History
-          </button>
-          <button className="sidebar-link" type="button">
+          </Link>
+          <Link className="sidebar-link" href="/customer#customer-settings">
             <span className="material-symbols-outlined">settings</span> Settings
-          </button>
-          <button className="sidebar-link" type="button" style={{ marginTop: "auto" }}>
+          </Link>
+          <Link className="sidebar-link" href="/customer#customer-settings" style={{ marginTop: "auto" }}>
             <span className="material-symbols-outlined">account_circle</span> Profile
-          </button>
+          </Link>
         </aside>
 
         <main className="dash-main">
@@ -345,7 +386,7 @@ export default function BookingClient() {
             </div>
           </div>
 
-          <div className="config-card">
+          <div className="config-card" ref={pickupScheduleRef} id="pickup-schedule-section">
             <div className="config-title">Pickup Details</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
               <div>
@@ -467,6 +508,9 @@ export default function BookingClient() {
                 className="btn-outline"
                 type="button"
                 style={{ color: "white", borderColor: "white", boxShadow: "4px 4px 0 0 white" }}
+                onClick={() =>
+                  pickupScheduleRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+                }
               >
                 <span
                   className="material-symbols-outlined"
@@ -514,59 +558,6 @@ export default function BookingClient() {
             </div>
           )}
 
-          <div
-            id="bookingModal"
-            style={{
-              display: modalOpen ? "flex" : "none",
-              position: "fixed",
-              inset: 0,
-              zIndex: 1000,
-              background: "rgba(0,0,0,0.7)",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-            role="dialog"
-            aria-modal="true"
-          >
-            <div
-              style={{
-                background: "var(--yellow)",
-                border: "4px solid var(--black)",
-                boxShadow: "12px 12px 0 0 var(--black)",
-                padding: 48,
-                maxWidth: 480,
-                width: "90%",
-                textAlign: "center",
-              }}
-            >
-              <div style={{ fontSize: 64, marginBottom: 16 }}>✓</div>
-              <h3
-                style={{
-                  fontFamily: "Space Grotesk",
-                  fontSize: 40,
-                  fontWeight: 900,
-                  textTransform: "uppercase",
-                  marginBottom: 12,
-                }}
-              >
-                Booking Confirmed!
-              </h3>
-              <p style={{ fontSize: 16, marginBottom: 24 }}>
-                Your rider will arrive during your chosen window. Track in real-time on the app.
-              </p>
-              <div style={{ fontFamily: "Space Grotesk", fontSize: 28, fontWeight: 900, marginBottom: 24 }}>
-                Order created successfully.
-              </div>
-              <button
-                className="btn-black"
-                type="button"
-                onClick={() => setModalOpen(false)}
-                style={{ fontSize: 14, width: "100%", textAlign: "center" }}
-              >
-                Done
-              </button>
-            </div>
-          </div>
         </main>
       </div>
     </div>

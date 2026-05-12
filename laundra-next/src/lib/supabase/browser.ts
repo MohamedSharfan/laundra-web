@@ -7,6 +7,7 @@ let cachedClient: ReturnType<typeof createClient> | null = null;
 
 export function createSupabaseBrowserClient() {
   if (cachedClient) return cachedClient;
+
   const env = getPublicEnv();
   if (env.NEXT_PUBLIC_SUPABASE_ANON_KEY === "missing") {
     throw new Error(
@@ -29,4 +30,3 @@ export function createSupabaseBrowserClient() {
 
   return cachedClient;
 }
-

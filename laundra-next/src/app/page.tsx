@@ -118,7 +118,7 @@ export default function Home() {
                 </span>
                 Book Pickup
               </Link>
-              <Link className="btn-black" href="/auth?role=rider">
+              <Link className="btn-black" href="/login/rider">
                 <span
                   className="material-symbols-outlined"
                   style={{
@@ -180,6 +180,11 @@ export default function Home() {
                 xmlns="http://www.w3.org/2000/svg"
               >
                 <rect width="500" height="500" fill="#1a1a1a" />
+                <defs>
+                  <clipPath id="laundraDrumClip">
+                    <circle cx="250" cy="290" r="93" />
+                  </clipPath>
+                </defs>
                 <g stroke="#2a2a2a" strokeWidth="1" opacity="0.5">
                   <line x1="0" y1="50" x2="500" y2="50" />
                   <line x1="0" y1="100" x2="500" y2="100" />
@@ -229,7 +234,86 @@ export default function Home() {
                 </text>
                 <circle cx="250" cy="290" r="110" fill="white" stroke="#005ab4" strokeWidth="6" />
                 <circle cx="250" cy="290" r="95" fill="#d6e3ff" stroke="#005ab4" strokeWidth="3" />
-                <circle cx="250" cy="290" r="88" fill="#1a1a1a" stroke="#005ab4" strokeWidth="2">
+                <g clipPath="url(#laundraDrumClip)">
+                  <circle cx="250" cy="290" r="92" fill="#7ea8ff" opacity="0.22" />
+                  <g>
+                    <animateTransform
+                      attributeName="transform"
+                      type="rotate"
+                      from="0 250 290"
+                      to="360 250 290"
+                      dur="2.9s"
+                      repeatCount="indefinite"
+                    />
+                    <path
+                      d="M 228 252 L 262 252 L 268 288 L 248 312 L 228 288 Z"
+                      fill="#ffcc00"
+                      stroke="#1a1a1a"
+                      strokeWidth="2.5"
+                      opacity="0.95"
+                    />
+                    <rect x="236" y="238" width="24" height="10" rx="3" fill="#ffcc00" stroke="#1a1a1a" strokeWidth="2" />
+                    <ellipse
+                      cx="276"
+                      cy="278"
+                      rx="22"
+                      ry="17"
+                      fill="#ffffff"
+                      stroke="#1a1a1a"
+                      strokeWidth="2"
+                      opacity="0.9"
+                      transform="rotate(38 276 278)"
+                    />
+                    <rect
+                      x="216"
+                      y="266"
+                      width="32"
+                      height="40"
+                      rx="6"
+                      fill="#e63b2e"
+                      stroke="#1a1a1a"
+                      strokeWidth="2"
+                      opacity="0.88"
+                      transform="rotate(-22 232 286)"
+                    />
+                  </g>
+                  <g>
+                    <animateTransform
+                      attributeName="transform"
+                      type="rotate"
+                      from="140 250 290"
+                      to="-220 250 290"
+                      dur="2.2s"
+                      repeatCount="indefinite"
+                    />
+                    <rect
+                      x="238"
+                      y="246"
+                      width="28"
+                      height="36"
+                      rx="5"
+                      fill="#f5f0e8"
+                      stroke="#1a1a1a"
+                      strokeWidth="2"
+                      transform="rotate(14 252 264)"
+                    />
+                    <path
+                      d="M 258 274 Q 274 262 286 276 Q 278 294 262 300 Z"
+                      fill="#005ab4"
+                      opacity="0.5"
+                    />
+                  </g>
+                  <circle cx="228" cy="312" r="4" fill="white" opacity="0.55">
+                    <animate attributeName="cy" values="312;268;312" dur="2.3s" repeatCount="indefinite" />
+                  </circle>
+                  <circle cx="268" cy="320" r="3.5" fill="white" opacity="0.45">
+                    <animate attributeName="cy" values="320;278;320" dur="1.85s" repeatCount="indefinite" />
+                  </circle>
+                  <circle cx="288" cy="306" r="3" fill="white" opacity="0.4">
+                    <animate attributeName="cy" values="306;262;306" dur="2.55s" repeatCount="indefinite" />
+                  </circle>
+                </g>
+                <circle cx="250" cy="290" r="88" fill="#1a1a1a" stroke="#005ab4" strokeWidth="2" opacity="0.1">
                   <animateTransform
                     attributeName="transform"
                     type="rotate"
@@ -708,7 +792,7 @@ export default function Home() {
       </section>
 
       {/* FAQ */}
-      <section className="section-pad bg-alt">
+      <section className="section-pad bg-alt" id="faq">
         <div className="section-inner">
           <div className="section-label animate-in">FAQ</div>
           <h2 className="section-title animate-in">

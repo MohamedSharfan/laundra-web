@@ -196,11 +196,26 @@ create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
 security definer
+set search_path = public
 as $$
+declare
+  r text;
 begin
+  r := coalesce(nullif(trim(new.raw_user_meta_data->>'role'), ''), 'customer');
+  if r not in ('customer', 'rider', 'admin') then
+    r := 'customer';
+  end if;
+
   insert into public.profiles (id, role, full_name)
-  values (new.id, 'customer', coalesce(new.raw_user_meta_data->>'full_name', null))
+  values (new.id, r, coalesce(new.raw_user_meta_data->>'full_name', null))
   on conflict (id) do nothing;
+
+  if r = 'rider' then
+    insert into public.riders (id)
+    values (new.id)
+    on conflict (id) do nothing;
+  end if;
+
   return new;
 end;
 $$;
@@ -210,6 +225,22 @@ do $$ begin
     after insert on auth.users
     for each row execute function public.handle_new_user();
 exception when duplicate_object then null; end $$;
+
+-- =========
+-- RLS helpers (avoid querying profiles inside profiles policies → 42P17 recursion)
+-- =========
+create or replace function public.requesting_profile_role()
+returns text
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select p.role from public.profiles p where p.id = auth.uid();
+$$;
+
+revoke all on function public.requesting_profile_role() from public;
+grant execute on function public.requesting_profile_role() to authenticated;
 
 -- =========
 -- RLS
@@ -227,12 +258,17 @@ alter table public.payments enable row level security;
 drop policy if exists "profiles_read_own" on public.profiles;
 create policy "profiles_read_own" on public.profiles
 for select to authenticated
-using (id = auth.uid() or exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin'));
+using (id = auth.uid() or public.requesting_profile_role() = 'admin');
 
 drop policy if exists "profiles_update_own" on public.profiles;
 create policy "profiles_update_own" on public.profiles
 for update to authenticated
 using (id = auth.uid())
+with check (id = auth.uid());
+
+drop policy if exists "profiles_insert_own" on public.profiles;
+create policy "profiles_insert_own" on public.profiles
+for insert to authenticated
 with check (id = auth.uid());
 
 -- SERVICE PACKAGES: readable by everyone
@@ -247,7 +283,7 @@ create policy "riders_read" on public.riders
 for select to authenticated
 using (
   id = auth.uid()
-  or exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin')
+  or public.requesting_profile_role() = 'admin'
 );
 
 drop policy if exists "riders_update_self" on public.riders;
@@ -256,6 +292,14 @@ for update to authenticated
 using (id = auth.uid())
 with check (id = auth.uid());
 
+drop policy if exists "riders_insert_self" on public.riders;
+create policy "riders_insert_self" on public.riders
+for insert to authenticated
+with check (
+  id = auth.uid()
+  and public.requesting_profile_role() = 'rider'
+);
+
 -- BOOKINGS: customers see theirs; riders see assigned + unassigned (available); admins see all
 drop policy if exists "bookings_select" on public.bookings;
 create policy "bookings_select" on public.bookings
@@ -263,14 +307,14 @@ for select to authenticated
 using (
   customer_id = auth.uid()
   or rider_id = auth.uid()
-  or exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin')
+  or public.requesting_profile_role() = 'admin'
   or (
-    exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'rider')
+    public.requesting_profile_role() = 'rider'
     and rider_id is null
   )
 );
 
--- BOOKINGS INSERT: authenticated customers only (role enforcement in app; still allow any authed user here)
+-- BOOKINGS INSERT: acting as the customer (your own laundry). Any profile role may book for self.
 drop policy if exists "bookings_insert_customer" on public.bookings;
 create policy "bookings_insert_customer" on public.bookings
 for insert to authenticated
@@ -284,18 +328,18 @@ drop policy if exists "bookings_update" on public.bookings;
 create policy "bookings_update" on public.bookings
 for update to authenticated
 using (
-  exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin')
+  public.requesting_profile_role() = 'admin'
   or (customer_id = auth.uid() and status = 'booking_placed')
   or (
-    exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'rider')
+    public.requesting_profile_role() = 'rider'
     and (rider_id = auth.uid() or rider_id is null)
   )
 )
 with check (
-  exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin')
+  public.requesting_profile_role() = 'admin'
   or (customer_id = auth.uid())
   or (
-    exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'rider')
+    public.requesting_profile_role() = 'rider'
     and rider_id = auth.uid()
   )
 );
@@ -311,7 +355,7 @@ using (
       and (
         b.customer_id = auth.uid()
         or b.rider_id = auth.uid()
-        or exists (select 1 from public.profiles p where p.id = auth.uid() and p.role='admin')
+        or public.requesting_profile_role() = 'admin'
       )
   )
 );
@@ -326,7 +370,7 @@ with check (
       and (
         b.customer_id = auth.uid()
         or b.rider_id = auth.uid()
-        or exists (select 1 from public.profiles p where p.id = auth.uid() and p.role='admin')
+        or public.requesting_profile_role() = 'admin'
       )
   )
 );
@@ -342,7 +386,7 @@ using (
       and (
         b.customer_id = auth.uid()
         or b.rider_id = auth.uid()
-        or exists (select 1 from public.profiles p where p.id = auth.uid() and p.role='admin')
+        or public.requesting_profile_role() = 'admin'
       )
   )
 );
@@ -373,7 +417,7 @@ create policy "payments_select" on public.payments
 for select to authenticated
 using (
   customer_id = auth.uid()
-  or exists (select 1 from public.profiles p where p.id = auth.uid() and p.role='admin')
+  or public.requesting_profile_role() = 'admin'
 );
 
 -- Realtime: ensure these tables are added to publication in Supabase dashboard if needed.

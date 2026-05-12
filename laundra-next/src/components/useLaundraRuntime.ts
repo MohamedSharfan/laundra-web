@@ -2,65 +2,91 @@
 
 import { useEffect } from "react";
 
-export function useLaundraRuntime() {
+let scrollRevealObserver: IntersectionObserver | null = null;
+
+function disconnectScrollReveal() {
+  scrollRevealObserver?.disconnect();
+  scrollRevealObserver = null;
+}
+
+/** Observe scroll reveals + immediately show elements already in the viewport (fixes /#process and client navigations). */
+export function wireHomeScrollAnimations() {
+  disconnectScrollReveal();
+
+  scrollRevealObserver = new IntersectionObserver(
+    (entries, obs) => {
+      entries.forEach((e) => {
+        if (e.isIntersecting) {
+          (e.target as HTMLElement).classList.add("visible");
+          obs.unobserve(e.target);
+        }
+      });
+    },
+    { threshold: 0.06, rootMargin: "0px 0px 12% 0px" },
+  );
+
+  document.querySelectorAll(".animate-in, .animate-in-left").forEach((el) => {
+    scrollRevealObserver!.observe(el);
+  });
+
+  const revealNow = () => {
+    const vh = window.innerHeight || document.documentElement.clientHeight;
+    document.querySelectorAll(".animate-in:not(.visible), .animate-in-left:not(.visible)").forEach((el) => {
+      const r = el.getBoundingClientRect();
+      if (r.top < vh + 120 && r.bottom > -60) {
+        (el as HTMLElement).classList.add("visible");
+        scrollRevealObserver?.unobserve(el);
+      }
+    });
+  };
+
+  requestAnimationFrame(() => {
+    revealNow();
+    requestAnimationFrame(revealNow);
+  });
+}
+
+function animateHeroStats() {
+  const targets = [
+    { id: "stat1", target: 50, suffix: "K+" },
+    { id: "stat2", target: 120, suffix: "K+" },
+    { id: "stat3", target: 1200, suffix: "+" },
+  ];
+
+  targets.forEach(({ id, target, suffix }) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    let count = 0;
+    const step = Math.ceil(target / 60);
+    const interval = window.setInterval(() => {
+      count = Math.min(count + step, target);
+      el.textContent = count.toLocaleString() + suffix;
+      if (count >= target) window.clearInterval(interval);
+    }, 25);
+  });
+}
+
+export function useLaundraRuntime(pathname: string) {
   useEffect(() => {
     const loaderBar = document.getElementById("loaderBar") as HTMLElement | null;
     const loader = document.getElementById("loader");
     const app = document.getElementById("app");
 
-    const initAnimations = () => {
-      const observer = new IntersectionObserver(
-        (entries, obs) => {
-          entries.forEach((e) => {
-            if (e.isIntersecting) {
-              (e.target as HTMLElement).classList.add("visible");
-              obs.unobserve(e.target);
-            }
-          });
-        },
-        { threshold: 0.1 },
-      );
-
-      document
-        .querySelectorAll(".animate-in, .animate-in-left")
-        .forEach((el) => observer.observe(el));
-    };
-
-    const animateStats = () => {
-      const targets = [
-        { id: "stat1", target: 50, suffix: "K+" },
-        { id: "stat2", target: 120, suffix: "K+" },
-        { id: "stat3", target: 1200, suffix: "+" },
-      ];
-
-      targets.forEach(({ id, target, suffix }) => {
-        const el = document.getElementById(id);
-        if (!el) return;
-        let count = 0;
-        const step = Math.ceil(target / 60);
-        const interval = window.setInterval(() => {
-          count = Math.min(count + step, target);
-          el.textContent = count.toLocaleString() + suffix;
-          if (count >= target) window.clearInterval(interval);
-        }, 25);
-      });
-    };
-
-    // Loader: mimic original behavior closely
     const onLoad = () => {
       if (loaderBar) loaderBar.style.width = "100%";
       window.setTimeout(() => {
         loader?.classList.add("hidden");
         app?.classList.add("visible");
-        window.setTimeout(initAnimations, 300);
-        window.setTimeout(animateStats, 800);
+        window.setTimeout(() => {
+          wireHomeScrollAnimations();
+          animateHeroStats();
+        }, 300);
       }, 1800);
     };
 
     if (document.readyState === "complete") onLoad();
     else window.addEventListener("load", onLoad);
 
-    // Scroll indicator + nav hide/reveal (original)
     let lastScroll = 0;
     const onScroll = () => {
       const scrollTop = window.scrollY;
@@ -84,5 +110,31 @@ export function useLaundraRuntime() {
       window.removeEventListener("load", onLoad);
     };
   }, []);
-}
 
+  useEffect(() => {
+    if (pathname !== "/") return;
+
+    const tryWireHome = () => {
+      const app = document.getElementById("app");
+      if (!app?.classList.contains("visible")) return false;
+      wireHomeScrollAnimations();
+      animateHeroStats();
+      return true;
+    };
+
+    if (tryWireHome()) {
+      return () => disconnectScrollReveal();
+    }
+
+    const iv = window.setInterval(() => {
+      if (tryWireHome()) window.clearInterval(iv);
+    }, 100);
+    const maxWait = window.setTimeout(() => window.clearInterval(iv), 5000);
+
+    return () => {
+      window.clearInterval(iv);
+      window.clearTimeout(maxWait);
+      disconnectScrollReveal();
+    };
+  }, [pathname]);
+}
