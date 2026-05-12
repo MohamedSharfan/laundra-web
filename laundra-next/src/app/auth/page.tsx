@@ -1,32 +1,46 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import type { SupabaseClient } from "@supabase/supabase-js";
-import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useSupabaseUser } from "@/lib/supabase/session";
 
 export default function AuthPage() {
-  const [supabase, setSupabase] = useState<SupabaseClient | null>(null);
-  const [envError, setEnvError] = useState<string | null>(null);
+  const { supabase, user, profile, loading, envError } = useSupabaseUser();
+  const router = useRouter();
+  const search = useSearchParams();
   const [email, setEmail] = useState("");
+  const roleParam = search.get("role");
+  const defaultRole = useMemo(
+    () => (roleParam === "rider" ? "rider" : "customer"),
+    [roleParam],
+  );
+  const [role, setRole] = useState<"customer" | "rider">(defaultRole);
   const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    try {
-      setSupabase(createSupabaseBrowserClient());
-    } catch (e: any) {
-      setEnvError(e?.message ?? "Supabase is not configured.");
+    setRole(defaultRole);
+  }, [defaultRole]);
+
+  useEffect(() => {
+    if (loading) return;
+    if (user && profile) {
+      router.replace(profile.role === "rider" ? "/rider" : "/customer");
     }
-  }, []);
+  }, [loading, user, profile, router]);
 
   const sendMagicLink = async () => {
     setStatus("sending");
     setError(null);
     if (!supabase) return;
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("laundra_role", role);
+    }
     const { error: signInError } = await supabase.auth.signInWithOtp({
       email,
       options: {
         emailRedirectTo: typeof window !== "undefined" ? `${window.location.origin}/` : undefined,
+        data: { role },
       },
     });
     if (signInError) {
@@ -55,6 +69,37 @@ export default function AuthPage() {
               {envError}
             </div>
           )}
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+              gap: 12,
+              marginBottom: 16,
+            }}
+          >
+            {["customer", "rider"].map((option) => (
+              <button
+                key={option}
+                type="button"
+                onClick={() => setRole(option as "customer" | "rider")}
+                style={{
+                  border: "3px solid var(--black)",
+                  background: role === option ? "var(--yellow)" : "white",
+                  boxShadow: "4px 4px 0 0 var(--black)",
+                  padding: "12px 14px",
+                  fontFamily: "Space Grotesk",
+                  fontWeight: 900,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.08em",
+                  fontSize: 11,
+                  cursor: "pointer",
+                }}
+              >
+                {option === "customer" ? "I am a customer" : "I am a rider"}
+              </button>
+            ))}
+          </div>
 
           <label
             style={{

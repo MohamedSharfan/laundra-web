@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useSupabaseUser } from "@/lib/supabase/session";
 
 type BookingRow = {
@@ -23,12 +24,24 @@ function formatLKR(amount: number) {
 }
 
 export default function CustomerClient() {
-  const { supabase, user, loading: authLoading } = useSupabaseUser();
+  const { supabase, user, profile, loading: authLoading } = useSupabaseUser();
+  const router = useRouter();
   const [rows, setRows] = useState<BookingRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const search = useSearchParams();
   const newlyCreated = search.get("new");
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (!user) {
+      router.replace("/auth?role=customer");
+      return;
+    }
+    if (profile?.role === "rider") {
+      router.replace("/rider");
+    }
+  }, [authLoading, user, profile?.role, router]);
 
   const fetchBookings = async () => {
     if (!user || !supabase) return;
@@ -117,7 +130,7 @@ export default function CustomerClient() {
               letterSpacing: "0.06em",
             }}
           >
-            Booking placed. Live updates enabled.
+            Appointment successful. Waiting for rider assignment.
           </div>
         )}
 
@@ -156,7 +169,10 @@ export default function CustomerClient() {
 
           {!!rows.length && (
             <div style={{ display: "grid", gap: 14 }}>
-              {rows.map((b) => (
+              {rows.map((b) => {
+                const isWaiting = b.status === "booking_placed";
+                const isAccepted = b.status === "rider_assigned" || b.status === "rider_arriving";
+                return (
                 <div
                   key={b.id}
                   style={{
@@ -196,6 +212,51 @@ export default function CustomerClient() {
                     >
                       {b.scheduled_date} · {b.scheduled_window} · {b.status.replaceAll("_", " ")}
                     </div>
+                    {isWaiting && (
+                      <div
+                        style={{
+                          marginTop: 10,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 10,
+                          padding: "6px 10px",
+                          border: "2px solid var(--black)",
+                          fontFamily: "Space Grotesk",
+                          fontWeight: 800,
+                          textTransform: "uppercase",
+                          fontSize: 10,
+                          letterSpacing: "0.08em",
+                          background: "#d6e3ff",
+                        }}
+                      >
+                        Finding rider
+                        <span className="loading-dots blue" aria-hidden="true">
+                          <span />
+                          <span />
+                          <span />
+                        </span>
+                      </div>
+                    )}
+                    {isAccepted && (
+                      <div
+                        style={{
+                          marginTop: 10,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 8,
+                          padding: "6px 10px",
+                          border: "2px solid var(--black)",
+                          fontFamily: "Space Grotesk",
+                          fontWeight: 800,
+                          textTransform: "uppercase",
+                          fontSize: 10,
+                          letterSpacing: "0.08em",
+                          background: "var(--yellow)",
+                        }}
+                      >
+                        Rider accepted
+                      </div>
+                    )}
                   </div>
 
                   <div style={{ textAlign: "right" }}>
@@ -214,7 +275,8 @@ export default function CustomerClient() {
                     </Link>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

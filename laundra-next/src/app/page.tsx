@@ -105,7 +105,7 @@ export default function Home() {
               deliver — with precision you can count on.
             </p>
             <div className="hero-actions">
-              <Link className="btn-yellow" href="/booking">
+              <Link className="btn-yellow" href="/booking?package=basic">
                 <span
                   className="material-symbols-outlined"
                   style={{
@@ -118,7 +118,7 @@ export default function Home() {
                 </span>
                 Book Pickup
               </Link>
-              <Link className="btn-black" href="/rider">
+              <Link className="btn-black" href="/auth?role=rider">
                 <span
                   className="material-symbols-outlined"
                   style={{
@@ -590,7 +590,7 @@ export default function Home() {
                   <span className="material-symbols-outlined">check</span>Premium detergents
                 </li>
               </ul>
-              <Link className="btn-primary" href="/booking">
+              <Link className="btn-primary" href="/booking?package=basic">
                 Book Basic
               </Link>
             </div>
@@ -617,7 +617,7 @@ export default function Home() {
                   <span className="material-symbols-outlined">check</span>Hypoallergenic available
                 </li>
               </ul>
-              <Link className="btn-yellow" href="/booking" style={{ fontSize: 14 }}>
+              <Link className="btn-yellow" href="/booking?package=pro" style={{ fontSize: 14 }}>
                 Book Pro
               </Link>
             </div>
@@ -639,7 +639,7 @@ export default function Home() {
                   <span className="material-symbols-outlined">check</span>Inspected + tagged
                 </li>
               </ul>
-              <Link className="btn-primary" href="/booking">
+              <Link className="btn-primary" href="/booking?package=luxury">
                 Book Luxury
               </Link>
             </div>
@@ -792,7 +792,7 @@ export default function Home() {
             <div className="footer-col-title">Product</div>
             <ul className="footer-links">
               <li>
-                <Link href="/booking">Book Pickup</Link>
+                <Link href="/booking?package=basic">Book Pickup</Link>
               </li>
               <li>
                 <Link href="/rider">Rider Portal</Link>

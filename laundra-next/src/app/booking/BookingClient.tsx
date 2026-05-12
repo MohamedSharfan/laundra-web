@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { z } from "zod";
 import { useSupabaseUser } from "@/lib/supabase/session";
 
@@ -17,7 +17,7 @@ export default function BookingClient() {
   const search = useSearchParams();
   const initialPackage = (search.get("package") ?? "basic") as "basic" | "pro" | "luxury";
 
-  const { supabase, user, loading: authLoading } = useSupabaseUser();
+  const { supabase, user, profile, loading: authLoading } = useSupabaseUser();
 
   const [service, setService] = useState<Service>("wash");
   const [weight, setWeight] = useState(12);
@@ -42,6 +42,17 @@ export default function BookingClient() {
   });
   const [timeWindow, setTimeWindow] = useState("09:00 – 11:00");
   const [city] = useState("Colombo");
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (!user) {
+      router.replace("/auth?role=customer");
+      return;
+    }
+    if (profile?.role === "rider") {
+      router.replace("/rider");
+    }
+  }, [authLoading, user, profile?.role, router]);
 
   const pricing = useMemo(() => {
     const basePerKg = initialPackage === "pro" ? 650 : service === "wash" ? 450 : 250; // LKR per kg

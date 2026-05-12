@@ -4,6 +4,7 @@ import { useEffect, useMemo } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useLaundraRuntime } from "./useLaundraRuntime";
+import { useSupabaseUser } from "@/lib/supabase/session";
 
 export default function LaundraChrome({
   children,
@@ -12,6 +13,8 @@ export default function LaundraChrome({
 }) {
   const pathname = usePathname();
   const router = useRouter();
+  const { profile } = useSupabaseUser();
+  const isRider = profile?.role === "rider";
 
   const active = useMemo(() => {
     if (pathname === "/booking") return "booking";
@@ -67,11 +70,11 @@ export default function LaundraChrome({
           </Link>
         </div>
         <div className="nav-cta">
-          <Link className="btn-outline" href="/rider">
-            Become a Rider
+          <Link className="btn-outline" href={isRider ? "/customer" : "/auth?role=rider"}>
+            {isRider ? "Customer Dashboard" : "Become a Rider"}
           </Link>
-          <Link className="btn-primary" href="/booking">
-            Book Pickup
+          <Link className="btn-primary" href={isRider ? "/rider" : "/booking?package=basic"}>
+            {isRider ? "Rider Portal" : "Book Pickup"}
           </Link>
         </div>
         <div className="hamburger" aria-hidden="true">
@@ -98,7 +101,7 @@ export default function LaundraChrome({
         <Link
           className={`mobile-nav-item ${active === "booking" ? "active" : ""}`}
           id="mobileBook"
-          href="/booking"
+          href="/booking?package=basic"
         >
           <span className="material-symbols-outlined">add_box</span>Book
         </Link>
@@ -109,9 +112,9 @@ export default function LaundraChrome({
         >
           <span className="material-symbols-outlined">two_wheeler</span>Rider
         </Link>
-        <button className="mobile-nav-item" id="mobileTrack" type="button">
+        <Link className="mobile-nav-item" id="mobileTrack" href="/customer">
           <span className="material-symbols-outlined">route</span>Track
-        </button>
+        </Link>
       </nav>
     </>
   );

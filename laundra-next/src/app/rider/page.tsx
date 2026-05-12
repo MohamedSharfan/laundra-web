@@ -2,18 +2,23 @@
 
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useSupabaseUser } from "@/lib/supabase/session";
 
 function formatLKR(amount: number) {
   return `Rs. ${amount.toLocaleString("en-LK")}`;
 }
 
-type Job = {
-  type: string;
-  price: number;
-  pickup: string;
-  dropoff: string;
-  shadow: "shadow-blue" | "shadow-red" | "shadow-yellow";
+type BookingJob = {
+  id: string;
+  service_type: string | null;
+  pickup_address: string | null;
+  pickup_city: string | null;
+  total_lkr: number | null;
+  scheduled_date: string | null;
+  scheduled_window: string | null;
+  status: string | null;
 };
 
 const RiderOperationsMap = dynamic(() => import("@/components/maps/RiderOperationsMap"), {
@@ -28,50 +33,110 @@ const RiderOperationsMap = dynamic(() => import("@/components/maps/RiderOperatio
 });
 
 export default function RiderPage() {
-  const jobs = useMemo<Job[]>(
-    () => [
-      {
-        type: "Express Wash",
-        price: 4850,
-        pickup: "No. 412, West End Ave, Colombo 03",
-        dropoff: "Laundra Hub · Kollupitiya",
-        shadow: "shadow-blue",
-      },
-      {
-        type: "Bulk Order",
-        price: 8250,
-        pickup: "No. 88, Galle Road, Dehiwala",
-        dropoff: "Laundra Hub · Dehiwala",
-        shadow: "shadow-red",
-      },
-      {
-        type: "Standard",
-        price: 3350,
-        pickup: "No. 150, Baseline Rd, Borella",
-        dropoff: "Laundra Hub · Borella",
-        shadow: "shadow-yellow",
-      },
-      {
-        type: "Dry Clean",
-        price: 6200,
-        pickup: "No. 22, Park St, Colombo 02",
-        dropoff: "Laundra Hub · Slave Island",
-        shadow: "shadow-blue",
-      },
-    ],
-    [],
-  );
+  const { supabase, user, profile, loading: authLoading } = useSupabaseUser();
+  const router = useRouter();
+  const [jobs, setJobs] = useState<BookingJob[]>([]);
+  const [accepted, setAccepted] = useState<Record<string, boolean>>({});
+  const [accepting, setAccepting] = useState<Record<string, boolean>>({});
+  const [toast, setToast] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const [accepted, setAccepted] = useState<Record<number, boolean>>({});
+  useEffect(() => {
+    if (authLoading) return;
+    if (!user) {
+      router.replace("/auth?role=rider");
+      return;
+    }
+    if (profile?.role === "customer") {
+      router.replace("/customer");
+    }
+  }, [authLoading, user, profile?.role, router]);
+
+  useEffect(() => {
+    if (!supabase) return;
+
+    const fetchJobs = async () => {
+      setLoading(true);
+      setError(null);
+      const { data, error: loadError } = await supabase
+        .from("bookings")
+        .select(
+          "id,service_type,pickup_address,pickup_city,total_lkr,scheduled_date,scheduled_window,status",
+        )
+        .eq("status", "booking_placed")
+        .is("rider_id", null)
+        .order("created_at", { ascending: false });
+
+      if (loadError) {
+        setError(loadError.message);
+        setJobs([]);
+      } else {
+        setJobs((data ?? []) as BookingJob[]);
+      }
+      setLoading(false);
+    };
+
+    fetchJobs();
+    const channel = supabase
+      .channel("rider-available-bookings")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "bookings" },
+        () => fetchJobs(),
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [supabase]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), 3200);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
   const nearbyOrders = useMemo(
     () =>
       jobs.map((job) => ({
-        label: job.type,
-        pickup: job.pickup,
-        city: job.pickup.split(",").slice(-1)[0]?.trim() || "Colombo",
+        label: job.service_type ?? "Booking",
+        pickup: job.pickup_address ?? "Pickup address pending",
+        city: job.pickup_city || "Colombo",
       })),
     [jobs],
   );
+
+  const handleAccept = async (job: BookingJob) => {
+    if (!supabase || !user) return;
+    setAccepting((prev) => ({ ...prev, [job.id]: true }));
+    setError(null);
+
+    const { error: updateError } = await supabase
+      .from("bookings")
+      .update({ rider_id: user.id, status: "rider_assigned" })
+      .eq("id", job.id);
+
+    if (updateError) {
+      setError(updateError.message);
+      setAccepting((prev) => ({ ...prev, [job.id]: false }));
+      return;
+    }
+
+    const { error: eventError } = await supabase.from("booking_events").insert({
+      booking_id: job.id,
+      status: "rider_assigned",
+      note: "Rider accepted the booking.",
+    });
+
+    if (eventError) {
+      setError(eventError.message);
+    }
+
+    setAccepted((prev) => ({ ...prev, [job.id]: true }));
+    setAccepting((prev) => ({ ...prev, [job.id]: false }));
+    setToast("Job accepted successfully.");
+  };
 
   return (
     <div id="page-rider" className="page-section active">
@@ -103,6 +168,58 @@ export default function RiderPage() {
 
         <main className="dash-main">
           <div className="dash-header">Rider Portal</div>
+
+          {toast && (
+            <div
+              style={{
+                marginBottom: 18,
+                border: "3px solid var(--black)",
+                background: "var(--yellow)",
+                boxShadow: "6px 6px 0 0 var(--black)",
+                padding: "12px 16px",
+                fontFamily: "Space Grotesk",
+                fontWeight: 900,
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+              }}
+            >
+              {toast}
+            </div>
+          )}
+
+          {!authLoading && !user && (
+            <div
+              style={{
+                marginBottom: 18,
+                border: "3px solid var(--black)",
+                background: "#ffe5e5",
+                boxShadow: "6px 6px 0 0 var(--black)",
+                padding: "12px 16px",
+                fontFamily: "Space Grotesk",
+                fontWeight: 800,
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+              }}
+            >
+              Please sign in as a rider to accept jobs.
+            </div>
+          )}
+
+          {error && (
+            <div
+              style={{
+                marginBottom: 18,
+                border: "3px solid var(--black)",
+                background: "#ffe5e5",
+                boxShadow: "6px 6px 0 0 var(--black)",
+                padding: "12px 16px",
+                fontFamily: "Space Grotesk",
+                fontWeight: 800,
+              }}
+            >
+              {error}
+            </div>
+          )}
 
           <div className="stat-grid">
             <div
@@ -214,10 +331,22 @@ export default function RiderPage() {
           </div>
 
           <div className="jobs-grid" id="jobsGrid">
-            {jobs.map((job, i) => {
-              const isAccepted = !!accepted[i];
+            {loading && (
+              <div style={{ fontFamily: "Space Grotesk", fontWeight: 800 }}>
+                Loading jobs...
+              </div>
+            )}
+            {!loading && jobs.length === 0 && (
+              <div style={{ fontFamily: "Space Grotesk", fontWeight: 800 }}>
+                No available jobs right now.
+              </div>
+            )}
+            {jobs.map((job) => {
+              const isAccepted = !!accepted[job.id];
+              const isAccepting = !!accepting[job.id];
+              const shadow = job.status === "booking_placed" ? "shadow-blue" : "shadow-yellow";
               return (
-                <div className={`job-card ${job.shadow}`} key={i}>
+                <div className={`job-card ${shadow}`} key={job.id}>
                   <div
                     style={{
                       display: "flex",
@@ -226,8 +355,10 @@ export default function RiderPage() {
                       marginBottom: 16,
                     }}
                   >
-                    <div className="job-type-badge">{job.type}</div>
-                    <div className="job-price">{formatLKR(job.price)}</div>
+                    <div className="job-type-badge">{job.service_type ?? "Laundry"}</div>
+                    <div className="job-price">
+                      {formatLKR(job.total_lkr ?? 0)}
+                    </div>
                   </div>
                   <div className="job-route">
                     <div className="job-point">
@@ -249,7 +380,9 @@ export default function RiderPage() {
                         width: 2,
                         height: 20,
                         background: "var(--primary)",
-                        marginLeft: 15,
+                          <div className="job-point-addr">
+                            {job.pickup_address ?? "Pickup address pending"}
+                          </div>
                       }}
                     />
                     <div className="job-point">
@@ -266,10 +399,27 @@ export default function RiderPage() {
                     <button
                       className="btn-accept"
                       type="button"
-                      disabled={isAccepted}
+                          <div className="job-point-addr">Laundra Hub</div>
                       onClick={() => setAccepted((a) => ({ ...a, [i]: true }))}
                       style={
                         isAccepted
+
+                    {(job.scheduled_date || job.scheduled_window) && (
+                      <div
+                        style={{
+                          marginTop: 12,
+                          fontFamily: "Space Grotesk",
+                          fontWeight: 800,
+                          fontSize: 11,
+                          textTransform: "uppercase",
+                          letterSpacing: "0.08em",
+                          opacity: 0.7,
+                        }}
+                      >
+                        {job.scheduled_date} {job.scheduled_window ? `· ${job.scheduled_window}` : ""}
+                      </div>
+                    )}
+
                           ? { background: "#00aa55", cursor: "default", transform: "none" }
                           : undefined
                       }
@@ -288,14 +438,15 @@ export default function RiderPage() {
           <div
             style={{
               marginTop: 48,
-              background: "var(--primary)",
+                        {job.pickup_city ?? "Colombo"}
               border: "4px solid var(--black)",
               boxShadow: "var(--shadow-yellow)",
               padding: 40,
               display: "grid",
-              gridTemplateColumns: "1fr auto",
+                        onClick={() => handleAccept(job)}
+                        disabled={!user || isAccepting || isAccepted}
               gap: 24,
-              alignItems: "center",
+                        {isAccepted ? "Accepted" : isAccepting ? "Accepting..." : "Accept Job"}
             }}
           >
             <div>
