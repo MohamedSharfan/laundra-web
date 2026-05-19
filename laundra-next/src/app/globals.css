@@ -203,6 +203,14 @@
     transition: border-color 0.15s, color 0.15s;
   }
   .nav-links a:hover, .nav-links a.active { border-bottom-color: var(--primary); color: var(--primary); }
+  .nav-links a.nav-link-muted {
+    color: var(--black);
+  }
+  .nav-links a.nav-link-muted:hover {
+    border-bottom-color: var(--black);
+    color: var(--black);
+    opacity: 0.88;
+  }
   .nav-cta {
     display: flex; gap: 12px; align-items: center;
   }
@@ -970,6 +978,277 @@
   .mobile-nav-item.active { background: var(--yellow); }
   .mobile-nav-item span.material-symbols-outlined { font-size: 20px !important; }
 
+  /* RESPONSIVE SYSTEM POLISH */
+  html {
+    overflow-x: hidden;
+    scroll-behavior: smooth;
+  }
+  body {
+    overflow-x: hidden;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  img, svg, video, canvas { max-width: 100%; height: auto; }
+  button, a, input, textarea, select {
+    min-width: 0;
+  }
+  button,
+  [role="button"],
+  .btn-primary,
+  .btn-yellow,
+  .btn-outline,
+  .slider-btn,
+  .sidebar-link,
+  .mobile-nav-item {
+    position: relative;
+    isolation: isolate;
+    transform: translateZ(0);
+    transition:
+      transform 180ms cubic-bezier(0.2, 0.9, 0.2, 1.35),
+      box-shadow 180ms ease,
+      background-color 180ms ease,
+      color 180ms ease,
+      border-color 180ms ease,
+      opacity 180ms ease;
+  }
+  button::after,
+  [role="button"]::after,
+  .btn-primary::after,
+  .btn-yellow::after,
+  .btn-outline::after,
+  .slider-btn::after,
+  .sidebar-link::after,
+  .mobile-nav-item::after {
+    content: "";
+    position: absolute;
+    inset: 50%;
+    z-index: 1;
+    width: 18px;
+    height: 18px;
+    border: 4px solid currentColor;
+    border-radius: 999px;
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.2);
+    pointer-events: none;
+  }
+  button:active,
+  [role="button"]:active,
+  .btn-primary:active,
+  .btn-yellow:active,
+  .btn-outline:active,
+  .slider-btn:active,
+  .sidebar-link:active,
+  .mobile-nav-item:active {
+    transform: translate(4px, 4px) scale(0.96);
+    box-shadow: 0 0 0 0 var(--black) !important;
+  }
+  button:active::after,
+  [role="button"]:active::after,
+  .btn-primary:active::after,
+  .btn-yellow:active::after,
+  .btn-outline:active::after,
+  .slider-btn:active::after,
+  .sidebar-link:active::after,
+  .mobile-nav-item:active::after {
+    animation: laundra-press-burst 520ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  button:focus-visible,
+  a:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible {
+    outline: 4px solid var(--yellow);
+    outline-offset: 4px;
+  }
+
+  @keyframes laundra-press-burst {
+    0% {
+      opacity: 0.55;
+      transform: translate(-50%, -50%) scale(0.15);
+    }
+    55% {
+      opacity: 0.28;
+      transform: translate(-50%, -50%) scale(8);
+    }
+    100% {
+      opacity: 0;
+      transform: translate(-50%, -50%) scale(13);
+    }
+  }
+
+  @media (max-width: 1024px) {
+    .section-inner {
+      width: min(100%, 920px);
+      padding-left: 20px;
+      padding-right: 20px;
+    }
+    .hero {
+      min-height: auto;
+      padding: 104px 20px 48px;
+    }
+    .hero-content {
+      max-width: 100%;
+    }
+    .hero-title,
+    .section-title {
+      overflow-wrap: anywhere;
+    }
+    .pricing-grid,
+    .bento-grid,
+    .stats-grid,
+    .profile-settings-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .phone-stack {
+      transform: scale(0.9);
+      transform-origin: center top;
+    }
+  }
+
+  @media (max-width: 768px) {
+    body {
+      padding-bottom: 72px;
+    }
+    .section-pad {
+      padding-top: 72px;
+      padding-bottom: 64px;
+    }
+    .section-inner {
+      padding-left: 16px;
+      padding-right: 16px;
+    }
+    .hero {
+      padding: 96px 16px 42px;
+      align-items: flex-start;
+    }
+    .hero-eyebrow,
+    .section-label,
+    .pricing-tier,
+    .config-title {
+      letter-spacing: 0.06em;
+    }
+    .hero-title {
+      font-size: clamp(54px, 16vw, 86px);
+      line-height: 0.92;
+    }
+    .section-title {
+      font-size: clamp(42px, 13vw, 68px);
+      line-height: 0.95;
+      margin-bottom: 28px;
+    }
+    .pricing-grid,
+    .bento-grid,
+    .stats-grid,
+    .profile-settings-grid,
+    .dashboard-grid,
+    .orders-grid,
+    .payment-grid,
+    .checkout-grid {
+      grid-template-columns: 1fr !important;
+    }
+    .pricing-card,
+    .bento-card,
+    .config-card,
+    .testimonial-card {
+      width: 100%;
+      max-width: 100%;
+    }
+    .testimonial-slider {
+      overflow: hidden;
+    }
+    .testimonial-card {
+      flex: 0 0 100%;
+    }
+    .slider-controls {
+      gap: 10px;
+    }
+    .slider-btn {
+      min-width: 48px;
+      min-height: 48px;
+    }
+    .dashboard-layout {
+      display: block;
+      min-height: auto;
+      padding-top: 72px;
+    }
+    .dash-main {
+      width: 100%;
+      padding: 24px 16px 88px;
+    }
+    .dash-header {
+      font-size: clamp(30px, 10vw, 44px);
+      margin-bottom: 24px;
+    }
+    input,
+    textarea,
+    select,
+    button,
+    .btn-primary,
+    .btn-yellow,
+    .btn-outline {
+      font-size: 16px;
+    }
+    .btn-primary,
+    .btn-yellow,
+    .btn-outline {
+      width: 100%;
+      justify-content: center;
+      text-align: center;
+      min-height: 48px;
+    }
+    .phone-stack {
+      transform: none;
+      width: 100%;
+      min-height: 520px;
+      overflow: hidden;
+    }
+    .phone {
+      max-width: min(78vw, 280px);
+    }
+  }
+
+  @media (max-width: 480px) {
+    nav.main-nav {
+      min-height: 64px;
+    }
+    .hero-title {
+      font-size: clamp(46px, 18vw, 68px);
+    }
+    .section-title {
+      font-size: clamp(36px, 15vw, 54px);
+    }
+    .pricing-price {
+      font-size: clamp(36px, 13vw, 52px);
+      overflow-wrap: anywhere;
+    }
+    .config-card,
+    .pricing-card,
+    .bento-card {
+      padding: 18px !important;
+      box-shadow: 6px 6px 0 0 var(--black) !important;
+    }
+    .mobile-nav {
+      height: 68px;
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+    .mobile-nav-item {
+      min-width: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      scroll-behavior: auto !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
   /* ANIMATIONS — .visible added by IntersectionObserver (see useLaundraRuntime) */
   .animate-in {
     opacity: 0; transform: translateY(24px);
@@ -981,6 +1260,11 @@
     transition: opacity 0.6s ease, transform 0.6s ease;
   }
   .animate-in-left.visible { opacity: 1; transform: translateX(0); }
+  .route-instant .animate-in,
+  .route-instant .animate-in-left {
+    opacity: 1;
+    transform: none;
+  }
 
   @media (prefers-reduced-motion: reduce) {
     .animate-in, .animate-in-left {
@@ -1216,6 +1500,148 @@
     70% { transform: scale(1.2); opacity: 0.1; }
     100% { transform: scale(1.35); opacity: 0; }
   }
+
+  .star-pop {
+    width: 48px;
+    height: 48px;
+    border: 3px solid var(--black);
+    background: white;
+    box-shadow: 4px 4px 0 0 var(--black);
+    cursor: pointer;
+    transition: transform 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+  }
+  .star-pop:hover {
+    transform: translateY(-4px) rotate(-4deg) scale(1.06);
+  }
+  .star-pop.active {
+    background: var(--yellow);
+    animation: starBounce 0.46s cubic-bezier(.2, 1.6, .4, 1);
+  }
+  .star-pop span {
+    font-size: 26px !important;
+    font-variation-settings: 'FILL' 1, 'wght' 700, 'GRAD' 0, 'opsz' 24;
+  }
+  .rating-celebration.burst::before,
+  .rating-celebration.burst::after {
+    content: '';
+    position: absolute;
+    inset: -20%;
+    pointer-events: none;
+    background:
+      radial-gradient(circle at 18% 24%, var(--yellow) 0 5px, transparent 6px),
+      radial-gradient(circle at 76% 16%, var(--primary) 0 5px, transparent 6px),
+      radial-gradient(circle at 88% 70%, #e63b2e 0 4px, transparent 5px),
+      radial-gradient(circle at 35% 82%, var(--yellow) 0 4px, transparent 5px);
+    animation: confettiPop 1.35s ease-out forwards;
+  }
+  .rating-celebration.burst::after {
+    animation-delay: 0.12s;
+    transform: rotate(18deg);
+  }
+  .rider-win-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: grid;
+    place-items: center;
+    background:
+      radial-gradient(circle at 20% 20%, rgba(255,204,0,0.22), transparent 26%),
+      radial-gradient(circle at 80% 18%, rgba(0,90,180,0.18), transparent 28%),
+      rgba(0,0,0,0.55);
+    animation: riderWinFade 3.6s ease forwards;
+    pointer-events: none;
+  }
+  .rider-win-card {
+    position: relative;
+    width: min(560px, calc(100vw - 32px));
+    border: 6px solid var(--black);
+    background: var(--yellow);
+    box-shadow: 14px 14px 0 0 var(--black);
+    padding: 42px 34px 36px;
+    text-align: center;
+    overflow: hidden;
+    animation: riderWinCard 0.72s cubic-bezier(.2, 1.45, .38, 1) both;
+  }
+  .rider-win-burst {
+    position: absolute;
+    inset: -35%;
+    background:
+      conic-gradient(from 0deg, transparent 0 8deg, rgba(255,255,255,0.75) 8deg 13deg, transparent 13deg 24deg),
+      radial-gradient(circle at 20% 28%, var(--primary) 0 7px, transparent 8px),
+      radial-gradient(circle at 72% 24%, #e63b2e 0 7px, transparent 8px),
+      radial-gradient(circle at 82% 72%, white 0 6px, transparent 7px),
+      radial-gradient(circle at 30% 78%, var(--primary) 0 6px, transparent 7px);
+    animation: riderWinBurst 2.1s ease-out infinite;
+    opacity: 0.8;
+  }
+  .rider-win-icon {
+    position: relative;
+    width: 82px;
+    height: 82px;
+    margin: 0 auto 18px;
+    display: grid;
+    place-items: center;
+    border: 5px solid var(--black);
+    background: white;
+    box-shadow: 7px 7px 0 0 var(--black);
+    animation: riderWinIcon 1s ease-in-out infinite alternate;
+  }
+  .rider-win-icon span {
+    font-size: 48px !important;
+    color: var(--primary);
+    font-variation-settings: 'FILL' 1, 'wght' 800, 'GRAD' 0, 'opsz' 48;
+  }
+  .rider-win-kicker,
+  .rider-win-meta {
+    position: relative;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 12px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+  }
+  .rider-win-title {
+    position: relative;
+    margin: 8px 0 12px;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: clamp(46px, 8vw, 86px);
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0;
+    line-height: 0.92;
+  }
+  .rider-win-meta {
+    letter-spacing: 0.06em;
+    opacity: 0.82;
+  }
+  @keyframes starBounce {
+    0% { transform: scale(0.88) rotate(0deg); }
+    55% { transform: scale(1.18) rotate(-8deg); }
+    100% { transform: scale(1) rotate(0deg); }
+  }
+  @keyframes confettiPop {
+    0% { opacity: 0; transform: scale(0.86) translateY(12px); }
+    18% { opacity: 1; }
+    100% { opacity: 0; transform: scale(1.08) translateY(-28px); }
+  }
+  @keyframes riderWinFade {
+    0% { opacity: 0; }
+    8%, 82% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+  @keyframes riderWinCard {
+    0% { opacity: 0; transform: translateY(28px) scale(0.82) rotate(-2deg); }
+    70% { opacity: 1; transform: translateY(-4px) scale(1.03) rotate(1deg); }
+    100% { opacity: 1; transform: translateY(0) scale(1) rotate(0deg); }
+  }
+  @keyframes riderWinBurst {
+    from { transform: rotate(0deg) scale(0.98); }
+    to { transform: rotate(28deg) scale(1.04); }
+  }
+  @keyframes riderWinIcon {
+    from { transform: translateY(0) rotate(-3deg); }
+    to { transform: translateY(-7px) rotate(4deg); }
+  }
   .pickup-marker, .dropoff-marker {
     width: 24px;
     height: 24px;
@@ -1229,3 +1655,177 @@
     font-size: 11px;
   }
   .dropoff-marker { background: var(--black); color: white; }
+
+  .booking-config-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+    gap: 24px;
+  }
+  .booking-pickup-grid,
+  .profile-settings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+  }
+  .profile-settings {
+    display: grid;
+    gap: 20px;
+  }
+  .profile-password-card {
+    border: 3px solid var(--black);
+    background: #f8f6ef;
+    padding: 18px;
+    box-shadow: 5px 5px 0 0 var(--black);
+  }
+  .profile-settings-note {
+    border: 3px solid var(--black);
+    padding: 12px 14px;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 12px;
+    font-weight: 900;
+    text-transform: uppercase;
+    box-shadow: 4px 4px 0 0 var(--black);
+  }
+  .profile-settings-note.success { background: #d6e3ff; }
+  .profile-settings-note.error { background: white; color: var(--red); }
+  .sim-payment-panel {
+    margin-top: 18px;
+    border: 4px solid var(--black);
+    background: #d6e3ff;
+    padding: 18px;
+    box-shadow: 7px 7px 0 0 var(--black);
+    overflow: hidden;
+    position: relative;
+  }
+  .sim-payment-panel::after {
+    content: '';
+    position: absolute;
+    inset: -45%;
+    background: conic-gradient(from 0deg, transparent 0 16deg, rgba(255,255,255,0.55) 16deg 20deg, transparent 20deg 36deg);
+    animation: simPaySweep 5s linear infinite;
+    pointer-events: none;
+  }
+  .sim-payment-panel.paid {
+    background: var(--yellow);
+    animation: simPaySettle 0.5s cubic-bezier(.2, 1.4, .4, 1) both;
+  }
+  .sim-payment-rail,
+  .sim-payment-status {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .sim-payment-rail span {
+    width: 42px;
+    height: 42px;
+    border: 3px solid var(--black);
+    background: white;
+    display: grid;
+    place-items: center;
+    box-shadow: 4px 4px 0 0 var(--black);
+  }
+  .sim-payment-rail strong,
+  .sim-payment-status {
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+  .sim-payment-rail p {
+    margin: 4px 0 0;
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    line-height: 1.45;
+    opacity: 0.78;
+    text-transform: none;
+  }
+  .sim-payment-status {
+    margin-top: 16px;
+    border-top: 3px solid rgba(0,0,0,0.18);
+    padding-top: 14px;
+    font-size: 12px;
+    letter-spacing: 0.06em;
+  }
+  @keyframes simPaySweep {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+  @keyframes simPaySettle {
+    0% { transform: scale(0.98); }
+    70% { transform: scale(1.015); }
+    100% { transform: scale(1); }
+  }
+
+  @media (max-width: 900px) {
+    .section-pad,
+    .section-pad-sm {
+      padding-left: 18px;
+      padding-right: 18px;
+    }
+    .dashboard-layout {
+      display: block;
+      padding-top: 72px;
+    }
+    .dash-main {
+      padding: 20px 16px 96px;
+      overflow: visible;
+    }
+    .booking-config-grid {
+      grid-template-columns: 1fr;
+    }
+    .config-card {
+      padding: 22px 18px;
+      box-shadow: 6px 6px 0 0 var(--black);
+    }
+    .order-summary {
+      position: static;
+      align-items: stretch;
+      padding: 22px 18px;
+      box-shadow: 6px 6px 0 0 var(--black);
+    }
+    .order-summary > div {
+      width: 100%;
+    }
+    .order-total {
+      font-size: clamp(34px, 12vw, 48px);
+    }
+    .btn-yellow,
+    .btn-black,
+    .btn-outline,
+    .btn-primary {
+      max-width: 100%;
+      white-space: normal;
+      text-align: center;
+    }
+    .weight-btns {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (max-width: 640px) {
+    .section-title {
+      font-size: clamp(34px, 13vw, 48px);
+      line-height: 0.95;
+      margin-bottom: 30px;
+    }
+    .dash-header {
+      font-size: clamp(30px, 12vw, 42px);
+      margin-bottom: 26px;
+    }
+    .booking-grid,
+    .profile-settings-grid,
+    .booking-pickup-grid {
+      grid-template-columns: 1fr;
+    }
+    .service-title {
+      font-size: 32px;
+    }
+    .weight-num {
+      font-size: 56px;
+    }
+    .star-pop {
+      width: 42px;
+      height: 42px;
+    }
+  }

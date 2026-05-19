@@ -4,11 +4,13 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import LaundraRouteLoader from "@/components/LaundraRouteLoader";
+import ProfileSettings from "@/components/auth/ProfileSettings";
 import { isAuthBypassEnabled } from "@/lib/auth-bypass";
 import { useSupabaseUser } from "@/lib/supabase/session";
 
 type BookingRow = {
   id: string;
+  rider_id: string | null;
   package_id: string;
   service_type: string;
   pickup_address: string;
@@ -18,10 +20,142 @@ type BookingRow = {
   status: string;
   total_lkr: number;
   created_at: string;
+  addons: {
+    checkout?: {
+      payment_method?: string;
+      invoice_number?: string;
+    };
+  } | null;
 };
+
+type RiderReviewRow = {
+  booking_id: string;
+  rating: number;
+};
+
+const ORDER_PROGRESS = [
+  { status: "booking_placed", label: "Booked" },
+  { status: "rider_assigned", label: "Rider assigned" },
+  { status: "picked_up", label: "Picked" },
+  { status: "out_for_delivery", label: "Ready to deliver" },
+  { status: "delivered", label: "Delivered" },
+] as const;
 
 function formatLKR(amount: number) {
   return `Rs. ${amount.toLocaleString("en-LK")}`;
+}
+
+function paymentLabel(method?: string) {
+  return method === "card" ? "Card payment" : "Cash on delivery";
+}
+
+function invoiceNumberFor(row: BookingRow) {
+  return row.addons?.checkout?.invoice_number ?? `LND-${row.id.slice(0, 8).toUpperCase()}`;
+}
+
+function invoiceHtml(row: BookingRow) {
+  const invoice = invoiceNumberFor(row);
+  const method = paymentLabel(row.addons?.checkout?.payment_method);
+  return `<!doctype html>
+<html>
+  <head>
+    <title>${invoice}</title>
+    <style>
+      body { font-family: Arial, sans-serif; padding: 32px; color: #111; }
+      .invoice { border: 4px solid #111; padding: 28px; max-width: 720px; }
+      h1 { margin: 0 0 10px; font-size: 34px; letter-spacing: 1px; }
+      .muted { color: #555; margin-bottom: 28px; }
+      .row { display: flex; justify-content: space-between; border-bottom: 1px solid #ddd; padding: 12px 0; gap: 16px; }
+      .total { font-size: 24px; font-weight: 900; border-bottom: 0; margin-top: 12px; }
+      .badge { display: inline-block; padding: 8px 10px; border: 2px solid #111; background: #ffcc00; font-weight: 800; }
+    </style>
+  </head>
+  <body>
+    <div class="invoice">
+      <h1>LAUNDRA INVOICE</h1>
+      <div class="muted">${invoice} · ${row.scheduled_date}</div>
+      <div class="badge">${method}</div>
+      <div class="row"><span>Service</span><strong>${row.package_id} · ${row.service_type.replaceAll("_", " ")}</strong></div>
+      <div class="row"><span>Pickup</span><strong>${row.pickup_address}, ${row.pickup_city}</strong></div>
+      <div class="row"><span>Window</span><strong>${row.scheduled_window}</strong></div>
+      <div class="row total"><span>Total paid</span><span>${formatLKR(row.total_lkr)}</span></div>
+    </div>
+  </body>
+</html>`;
+}
+
+function progressIndex(status: string) {
+  if (status === "rider_arriving") return 1;
+  if (status === "washing_started" || status === "washing_completed" || status === "ironing_started" || status === "ironing_completed") return 2;
+  const index = ORDER_PROGRESS.findIndex((step) => step.status === status);
+  return index >= 0 ? index : 0;
+}
+
+function CustomerProgressBar({ status }: { status: string }) {
+  const current = progressIndex(status);
+  const pct = (current / (ORDER_PROGRESS.length - 1)) * 100;
+
+  return (
+    <div style={{ marginTop: 14, maxWidth: 620 }}>
+      <div
+        style={{
+          position: "relative",
+          height: 14,
+          border: "3px solid var(--black)",
+          background: "white",
+          boxShadow: "3px 3px 0 0 var(--black)",
+          marginBottom: 12,
+        }}
+      >
+        <div
+          style={{
+            width: `${pct}%`,
+            height: "100%",
+            background: current >= ORDER_PROGRESS.length - 1 ? "var(--yellow)" : "var(--primary)",
+            transition: "width 0.35s ease",
+          }}
+        />
+      </div>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: `repeat(${ORDER_PROGRESS.length}, minmax(0, 1fr))`,
+          gap: 8,
+        }}
+      >
+        {ORDER_PROGRESS.map((step, idx) => {
+          const done = idx <= current;
+          return (
+            <div key={step.status} style={{ minWidth: 0 }}>
+              <div
+                style={{
+                  width: 22,
+                  height: 22,
+                  border: "3px solid var(--black)",
+                  background: done ? "var(--yellow)" : "white",
+                  boxShadow: done ? "2px 2px 0 0 var(--black)" : "none",
+                  marginBottom: 6,
+                }}
+              />
+              <div
+                style={{
+                  fontFamily: "Space Grotesk",
+                  fontSize: 9,
+                  fontWeight: 900,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.04em",
+                  lineHeight: 1.25,
+                  opacity: done ? 1 : 0.52,
+                }}
+              >
+                {step.label}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 export default function CustomerClient() {
@@ -34,6 +168,10 @@ export default function CustomerClient() {
   const newlyCreated = searchParams.get("new");
   const prevStatusRef = useRef<Record<string, string>>({});
   const [acceptBanner, setAcceptBanner] = useState<string | null>(null);
+  const [reviewByBooking, setReviewByBooking] = useState<Record<string, number>>({});
+  const [ratingDraft, setRatingDraft] = useState<Record<string, number>>({});
+  const [ratingMessage, setRatingMessage] = useState<Record<string, string>>({});
+  const [celebratingBooking, setCelebratingBooking] = useState<string | null>(null);
 
   const fetchBookings = useCallback(
     async (opts?: { silent?: boolean }) => {
@@ -45,7 +183,7 @@ export default function CustomerClient() {
       const { data, error: qErr } = await supabase
         .from("bookings")
         .select(
-          "id,package_id,service_type,pickup_address,pickup_city,scheduled_date,scheduled_window,status,total_lkr,created_at",
+          "id,rider_id,package_id,service_type,pickup_address,pickup_city,scheduled_date,scheduled_window,status,total_lkr,created_at,addons",
         )
         .eq("customer_id", user.id)
         .order("created_at", { ascending: false });
@@ -64,7 +202,7 @@ export default function CustomerClient() {
   useEffect(() => {
     if (authLoading || isAuthBypassEnabled()) return;
     if (!user) {
-      router.replace("/login/customer");
+      router.replace("/login");
       return;
     }
     if (profile?.role === "rider") {
@@ -76,18 +214,22 @@ export default function CustomerClient() {
     if (authLoading) return;
 
     if (isAuthBypassEnabled() && !user) {
-      setLoading(false);
-      setRows([]);
-      setError(null);
-      return;
+      const timer = window.setTimeout(() => {
+        setLoading(false);
+        setRows([]);
+        setError(null);
+      }, 0);
+      return () => window.clearTimeout(timer);
     }
 
     if (!user || !supabase) {
-      setLoading(false);
-      return;
+      const timer = window.setTimeout(() => setLoading(false), 0);
+      return () => window.clearTimeout(timer);
     }
 
-    fetchBookings();
+    const fetchTimer = window.setTimeout(() => {
+      fetchBookings();
+    }, 0);
 
     const channel = supabase
       .channel("customer-bookings")
@@ -99,6 +241,7 @@ export default function CustomerClient() {
       .subscribe();
 
     return () => {
+      window.clearTimeout(fetchTimer);
       supabase.removeChannel(channel);
     };
   }, [authLoading, user?.id, supabase, fetchBookings]);
@@ -146,6 +289,91 @@ export default function CustomerClient() {
     }
   }, [rows]);
 
+  useEffect(() => {
+    if (authLoading || typeof window === "undefined") return;
+    const hash = window.location.hash;
+    if (!hash) return;
+
+    const timer = window.setTimeout(() => {
+      document.getElementById(hash.slice(1))?.scrollIntoView({ block: "start" });
+    }, 80);
+
+    return () => window.clearTimeout(timer);
+  }, [authLoading, loading, rows.length]);
+
+  useEffect(() => {
+    if (!supabase || !user || !rows.length) return;
+    const deliveredIds = rows.filter((r) => r.status === "delivered").map((r) => r.id);
+    if (!deliveredIds.length) {
+      const timer = window.setTimeout(() => setReviewByBooking({}), 0);
+      return () => window.clearTimeout(timer);
+    }
+
+    let cancelled = false;
+    supabase
+      .from("rider_reviews")
+      .select("booking_id,rating")
+      .in("booking_id", deliveredIds)
+      .eq("customer_id", user.id)
+      .then(({ data }) => {
+        if (cancelled) return;
+        const next: Record<string, number> = {};
+        ((data ?? []) as RiderReviewRow[]).forEach((review) => {
+          next[review.booking_id] = review.rating;
+        });
+        setReviewByBooking(next);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase, user, rows]);
+
+  const submitRiderRating = async (row: BookingRow) => {
+    if (!supabase || !user || !row.rider_id) return;
+    const rating = ratingDraft[row.id] ?? 5;
+
+    const { error: ratingError } = await supabase.from("rider_reviews").insert({
+      booking_id: row.id,
+      customer_id: user.id,
+      rider_id: row.rider_id,
+      rating,
+      comment: `Customer rated ${rating}/5 after delivery.`,
+    });
+
+    if (ratingError) {
+      setRatingMessage((prev) => ({
+        ...prev,
+        [row.id]: ratingError.code === "23505" ? "You already rated this delivery." : ratingError.message,
+      }));
+      return;
+    }
+
+    setReviewByBooking((prev) => ({ ...prev, [row.id]: rating }));
+    setCelebratingBooking(row.id);
+    setRatingMessage((prev) => ({ ...prev, [row.id]: "Rating sent. Thanks for celebrating great service." }));
+    window.setTimeout(() => setCelebratingBooking(null), 2400);
+  };
+
+  const printInvoice = (row: BookingRow) => {
+    const popup = window.open("", "_blank", "width=820,height=900");
+    if (!popup) return;
+    popup.document.write(invoiceHtml(row));
+    popup.document.close();
+    popup.focus();
+    popup.print();
+  };
+
+  const downloadInvoice = (row: BookingRow) => {
+    const blob = new Blob([invoiceHtml(row)], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${invoiceNumberFor(row)}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const bypass = isAuthBypassEnabled();
 
   const highlightBooking = useMemo(() => {
@@ -173,7 +401,7 @@ export default function CustomerClient() {
           <h2 className="section-title">Dashboard</h2>
           <div className="config-card" style={{ maxWidth: 720 }}>
             <div className="config-title">Sign in required</div>
-            <Link className="btn-yellow" href="/login/customer">
+            <Link className="btn-yellow" href="/login">
               Sign In
             </Link>
           </div>
@@ -204,7 +432,7 @@ export default function CustomerClient() {
             <p style={{ lineHeight: 1.6, opacity: 0.85 }}>
               Sign-in gate is off. Orders stay empty until you sign in with Supabase.
             </p>
-            <Link className="btn-yellow" href="/login/customer" style={{ marginTop: 12 }}>
+            <Link className="btn-yellow" href="/login" style={{ marginTop: 12 }}>
               Sign in
             </Link>
           </div>
@@ -527,6 +755,7 @@ export default function CustomerClient() {
                       >
                         {b.scheduled_date} · {b.scheduled_window} · {b.status.replaceAll("_", " ")}
                       </div>
+                      <CustomerProgressBar status={b.status} />
                       {isWaiting && (
                         <div
                           style={{
@@ -589,9 +818,151 @@ export default function CustomerClient() {
                         Track
                       </Link>
                     </div>
+
+                    {b.status === "delivered" && (
+                      <div
+                        className={celebratingBooking === b.id ? "rating-celebration burst" : "rating-celebration"}
+                        style={{
+                          gridColumn: "1 / -1",
+                          marginTop: 4,
+                          border: "4px solid var(--black)",
+                          background: "#fffef5",
+                          boxShadow: "8px 8px 0 0 var(--yellow)",
+                          padding: 16,
+                          position: "relative",
+                          overflow: "hidden",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            gap: 16,
+                            flexWrap: "wrap",
+                            alignItems: "center",
+                          }}
+                        >
+                          <div>
+                            <div
+                              style={{
+                                fontFamily: "Space Grotesk",
+                                fontWeight: 900,
+                                textTransform: "uppercase",
+                                letterSpacing: "0.08em",
+                                fontSize: 12,
+                              }}
+                            >
+                              Delivery complete
+                            </div>
+                            <div style={{ marginTop: 6, fontFamily: "Inter", fontSize: 13, opacity: 0.78 }}>
+                              Invoice {invoiceNumberFor(b)} · {paymentLabel(b.addons?.checkout?.payment_method)}
+                            </div>
+                          </div>
+                          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                            <button className="btn-outline" type="button" onClick={() => printInvoice(b)}>
+                              Print invoice
+                            </button>
+                            <button className="btn-yellow" type="button" onClick={() => downloadInvoice(b)}>
+                              Download invoice
+                            </button>
+                          </div>
+                        </div>
+
+                        <div style={{ marginTop: 18, borderTop: "3px solid var(--black)", paddingTop: 14 }}>
+                          {reviewByBooking[b.id] ? (
+                            <div
+                              style={{
+                                fontFamily: "Space Grotesk",
+                                fontWeight: 900,
+                                textTransform: "uppercase",
+                                color: "var(--primary)",
+                              }}
+                            >
+                              You rated this rider {reviewByBooking[b.id]}/5 stars
+                            </div>
+                          ) : (
+                            <>
+                              <div
+                                style={{
+                                  fontFamily: "Space Grotesk",
+                                  fontWeight: 900,
+                                  textTransform: "uppercase",
+                                  marginBottom: 10,
+                                }}
+                              >
+                                Celebrate your rider
+                              </div>
+                              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                                {[1, 2, 3, 4, 5].map((n) => {
+                                  const active = n <= (ratingDraft[b.id] ?? 5);
+                                  return (
+                                    <button
+                                      key={n}
+                                      className={active ? "star-pop active" : "star-pop"}
+                                      type="button"
+                                      onClick={() => setRatingDraft((prev) => ({ ...prev, [b.id]: n }))}
+                                      aria-label={`${n} stars`}
+                                    >
+                                      <span className="material-symbols-outlined">star</span>
+                                    </button>
+                                  );
+                                })}
+                                <button
+                                  className="btn-black"
+                                  type="button"
+                                  onClick={() => void submitRiderRating(b)}
+                                  disabled={!b.rider_id}
+                                  style={{ marginLeft: 4 }}
+                                >
+                                  Send rating
+                                </button>
+                              </div>
+                            </>
+                          )}
+                          {ratingMessage[b.id] && (
+                            <div style={{ marginTop: 10, fontFamily: "Inter", fontSize: 13, fontWeight: 800 }}>
+                              {ratingMessage[b.id]}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}
+            </div>
+          )}
+        </div>
+
+        <div
+          className="config-card animate-in"
+          id="customer-history"
+          style={{ marginTop: 24, scrollMarginTop: 120 }}
+        >
+          <div className="config-title">History</div>
+          {!rows.length && <div style={{ opacity: 0.75 }}>Completed and past orders will appear here.</div>}
+          {!!rows.length && (
+            <div style={{ display: "grid", gap: 10 }}>
+              {rows.slice(0, 5).map((b) => (
+                <div
+                  key={`history-${b.id}`}
+                  style={{
+                    border: "2px solid var(--black)",
+                    padding: "10px 12px",
+                    fontFamily: "Space Grotesk",
+                    fontSize: 12,
+                    fontWeight: 800,
+                    textTransform: "uppercase",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <span>{b.package_id} · {b.status.replaceAll("_", " ")}</span>
+                  <span>{b.scheduled_date}</span>
+                </div>
+              ))}
             </div>
           )}
         </div>
@@ -602,9 +973,7 @@ export default function CustomerClient() {
           style={{ marginTop: 24, scrollMarginTop: 120 }}
         >
           <div className="config-title">Account</div>
-          <p style={{ margin: 0, lineHeight: 1.6, opacity: 0.85 }}>
-            Profile, addresses, and notification preferences will live here.
-          </p>
+          <ProfileSettings />
         </div>
       </div>
     </div>

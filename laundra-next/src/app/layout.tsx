@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import "leaflet/dist/leaflet.css";
 import "./globals.css";
-import LaundraChrome from "@/components/LaundraChrome";
+import AppShell from "@/components/AppShell";
 
 export const metadata: Metadata = {
   title: "LAUNDRA — Clean. Bold. Precise.",
@@ -33,7 +33,7 @@ export default function RootLayout({
         />
       </head>
       <body>
-        <LaundraChrome>{children}</LaundraChrome>
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );

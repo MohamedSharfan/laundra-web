@@ -7,23 +7,19 @@ function safeInternalPath(raw: string | null): string | null {
   return raw;
 }
 
-/** Routes anyone can open without signing in (marketing, shared tracking links, login). */
+/** Routes anyone can open without signing in (marketing, shared tracking links). */
 function isPublicRoute(pathname: string): boolean {
   if (pathname === "/") return true;
+  if (pathname === "/api/auth/register") return true;
   if (pathname.startsWith("/track/")) return true;
   return false;
 }
 
-function isLoginRoute(pathname: string): boolean {
-  return pathname === "/auth" || pathname.startsWith("/login/");
+function isAuthRoute(pathname: string): boolean {
+  return pathname === "/auth" || pathname.startsWith("/login") || pathname.startsWith("/signup");
 }
 
-function loginUrlForProtectedRoute(pathname: string): "/login/customer" | "/login/rider" {
-  if (pathname.startsWith("/rider")) return "/login/rider";
-  return "/login/customer";
-}
-
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { supabase, response } = createSupabaseMiddlewareClient(request);
 
   if (!supabase) {
@@ -44,7 +40,7 @@ export async function middleware(request: NextRequest) {
 
   const needsProfile =
     !!user &&
-    (isLoginRoute(pathname) ||
+    (isAuthRoute(pathname) ||
       pathname.startsWith("/rider") ||
       pathname.startsWith("/customer") ||
       pathname.startsWith("/booking"));
@@ -66,7 +62,7 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  if (isLoginRoute(pathname)) {
+  if (isAuthRoute(pathname)) {
     if (!user) {
       return response;
     }
@@ -76,25 +72,29 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(new URL(nextDest, request.url));
     }
 
-    const onRiderLogin =
-      pathname === "/login/rider" ||
-      (pathname === "/auth" && request.nextUrl.searchParams.get("role") === "rider");
-
-    if (onRiderLogin && profileRole === "customer") {
-      return response;
+    if (pathname.startsWith("/signup")) {
+      const wantsRider = request.nextUrl.searchParams.get("role") === "rider";
+      if (wantsRider && profileRole === "customer") {
+        return NextResponse.redirect(new URL("/login?switch=rider", request.url));
+      }
+      const url = request.nextUrl.clone();
+      url.search = "";
+      url.pathname = profileRole === "rider" ? "/rider" : "/customer";
+      return NextResponse.redirect(url);
     }
 
-    if (pathname === "/login/customer" && profileRole === "rider") {
-      return NextResponse.redirect(new URL("/rider", request.url));
-    }
-    if (pathname === "/login/rider" && profileRole === "customer") {
-      return NextResponse.redirect(new URL("/customer", request.url));
+    if (pathname.startsWith("/login") || pathname === "/auth") {
+      const switchRider = request.nextUrl.searchParams.get("switch") === "rider";
+      if (switchRider && profileRole === "customer") {
+        return response;
+      }
+      const url = request.nextUrl.clone();
+      url.search = "";
+      url.pathname = profileRole === "rider" ? "/rider" : "/customer";
+      return NextResponse.redirect(url);
     }
 
-    const url = request.nextUrl.clone();
-    url.search = "";
-    url.pathname = profileRole === "rider" ? "/rider" : "/customer";
-    return NextResponse.redirect(url);
+    return response;
   }
 
   if (!user) {
@@ -103,7 +103,7 @@ export async function middleware(request: NextRequest) {
     }
 
     const url = request.nextUrl.clone();
-    url.pathname = loginUrlForProtectedRoute(pathname);
+    url.pathname = "/login";
     const dest = `${pathname}${request.nextUrl.search}`;
     url.searchParams.set("next", dest);
     return NextResponse.redirect(url);

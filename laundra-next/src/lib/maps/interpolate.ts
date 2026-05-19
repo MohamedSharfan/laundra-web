@@ -9,8 +9,8 @@ export function useSmoothPosition(target: LatLng | null, durationMs = 1500) {
 
   useEffect(() => {
     if (!target) {
-      setCurrent(null);
-      return;
+      const timer = window.setTimeout(() => setCurrent(null), 0);
+      return () => window.clearTimeout(timer);
     }
     const from = current ?? target;
     fromRef.current = from;

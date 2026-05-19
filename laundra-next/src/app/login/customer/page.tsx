@@ -1,27 +1,9 @@
-import { Suspense } from "react";
-import MagicLinkAuth from "@/components/auth/MagicLinkAuth";
+import { redirect } from "next/navigation";
 
-function LoginFallback() {
-  return (
-    <div
-      className="section-pad"
-      style={{
-        paddingTop: 120,
-        background: "var(--bg)",
-        fontFamily: "Space Grotesk",
-        fontWeight: 800,
-        textTransform: "uppercase",
-      }}
-    >
-      Loading…
-    </div>
-  );
-}
+type Props = { searchParams: Promise<Record<string, string | string[] | undefined>> };
 
-export default function CustomerLoginPage() {
-  return (
-    <Suspense fallback={<LoginFallback />}>
-      <MagicLinkAuth fixedRole="customer" />
-    </Suspense>
-  );
+export default async function LegacyCustomerLogin({ searchParams }: Props) {
+  const sp = await searchParams;
+  const next = typeof sp.next === "string" ? sp.next : undefined;
+  redirect(next ? `/login?next=${encodeURIComponent(next)}` : "/login");
 }

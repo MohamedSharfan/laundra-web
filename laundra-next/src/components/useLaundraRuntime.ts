@@ -72,14 +72,20 @@ export function useLaundraRuntime(pathname: string) {
     const loader = document.getElementById("loader");
     const app = document.getElementById("app");
 
-    const onLoad = () => {
+    const showApp = () => {
       if (loaderBar) loaderBar.style.width = "100%";
+      loader?.classList.add("hidden");
+      app?.classList.add("visible");
+    };
+
+    const onLoad = () => {
       window.setTimeout(() => {
-        loader?.classList.add("hidden");
-        app?.classList.add("visible");
+        showApp();
         window.setTimeout(() => {
-          wireHomeScrollAnimations();
-          animateHeroStats();
+          if (window.location.pathname === "/") {
+            wireHomeScrollAnimations();
+            animateHeroStats();
+          }
         }, 300);
       }, 1800);
     };
@@ -112,7 +118,15 @@ export function useLaundraRuntime(pathname: string) {
   }, []);
 
   useEffect(() => {
-    if (pathname !== "/") return;
+    const app = document.getElementById("app");
+    const loader = document.getElementById("loader");
+    app?.classList.add("visible");
+    loader?.classList.add("hidden");
+
+    if (pathname !== "/") {
+      disconnectScrollReveal();
+      return;
+    }
 
     const tryWireHome = () => {
       const app = document.getElementById("app");
