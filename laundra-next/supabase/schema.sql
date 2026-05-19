@@ -155,8 +155,39 @@ create table if not exists public.payments (
   amount_lkr integer not null,
   status text not null default 'pending' check (status in ('pending','paid','failed','refunded')),
   provider text,
+  method text not null default 'cash_on_delivery' check (method in ('cash_on_delivery','card')),
+  invoice jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
 );
+
+-- =========
+-- BUSINESS REVIEWS
+-- =========
+create table if not exists public.business_reviews (
+  id uuid primary key default gen_random_uuid(),
+  customer_id uuid references public.profiles(id) on delete set null,
+  customer_name text not null,
+  rating integer not null check (rating between 1 and 5),
+  comment text not null check (char_length(trim(comment)) between 8 and 400),
+  is_public boolean not null default true,
+  created_at timestamptz not null default now()
+);
+create index if not exists business_reviews_public_idx on public.business_reviews(is_public, created_at desc);
+
+-- =========
+-- RIDER REVIEWS
+-- =========
+create table if not exists public.rider_reviews (
+  id uuid primary key default gen_random_uuid(),
+  booking_id uuid not null references public.bookings(id) on delete cascade unique,
+  customer_id uuid not null references public.profiles(id) on delete cascade,
+  rider_id uuid not null references public.riders(id) on delete cascade,
+  rating integer not null check (rating between 1 and 5),
+  comment text,
+  created_at timestamptz not null default now()
+);
+create index if not exists rider_reviews_rider_idx on public.rider_reviews(rider_id, created_at desc);
+create index if not exists rider_reviews_customer_idx on public.rider_reviews(customer_id, created_at desc);
 
 -- =========
 -- UPDATED_AT triggers
@@ -253,6 +284,8 @@ alter table public.booking_events enable row level security;
 alter table public.booking_tracking enable row level security;
 alter table public.notifications enable row level security;
 alter table public.payments enable row level security;
+alter table public.business_reviews enable row level security;
+alter table public.rider_reviews enable row level security;
 
 -- PROFILES: users can read/update themselves; admins read all
 drop policy if exists "profiles_read_own" on public.profiles;
@@ -420,5 +453,73 @@ using (
   or public.requesting_profile_role() = 'admin'
 );
 
--- Realtime: ensure these tables are added to publication in Supabase dashboard if needed.
+drop policy if exists "payments_insert_own" on public.payments;
+create policy "payments_insert_own" on public.payments
+for insert to authenticated
+with check (customer_id = auth.uid());
 
+drop policy if exists "business_reviews_read_public" on public.business_reviews;
+create policy "business_reviews_read_public" on public.business_reviews
+for select to anon, authenticated
+using (is_public = true or customer_id = auth.uid() or public.requesting_profile_role() = 'admin');
+
+drop policy if exists "business_reviews_insert_own" on public.business_reviews;
+create policy "business_reviews_insert_own" on public.business_reviews
+for insert to authenticated
+with check (customer_id = auth.uid());
+
+drop policy if exists "rider_reviews_select_related" on public.rider_reviews;
+create policy "rider_reviews_select_related" on public.rider_reviews
+for select to authenticated
+using (
+  customer_id = auth.uid()
+  or rider_id = auth.uid()
+  or public.requesting_profile_role() = 'admin'
+);
+
+drop policy if exists "rider_reviews_insert_customer" on public.rider_reviews;
+create policy "rider_reviews_insert_customer" on public.rider_reviews
+for insert to authenticated
+with check (
+  customer_id = auth.uid()
+  and exists (
+    select 1 from public.bookings b
+    where b.id = booking_id
+      and b.customer_id = auth.uid()
+      and b.rider_id = rider_reviews.rider_id
+      and b.status = 'delivered'
+  )
+);
+
+create or replace function public.refresh_rider_rating(target_rider uuid)
+returns void
+language sql
+security definer
+set search_path = public
+as $$
+  update public.riders
+  set rating = coalesce(
+    (select round(avg(r.rating)::numeric, 2) from public.rider_reviews r where r.rider_id = target_rider),
+    5.00
+  )
+  where id = target_rider;
+$$;
+
+create or replace function public.handle_rider_review_rating()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  perform public.refresh_rider_rating(new.rider_id);
+  return new;
+end;
+$$;
+
+drop trigger if exists rider_reviews_refresh_rating on public.rider_reviews;
+create trigger rider_reviews_refresh_rating
+after insert or update on public.rider_reviews
+for each row execute function public.handle_rider_review_rating();
+
+-- Realtime: ensure these tables are added to publication in Supabase dashboard if needed.

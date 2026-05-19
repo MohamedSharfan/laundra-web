@@ -17,7 +17,7 @@ export function useBookingTracking(supabase: SupabaseClient | null, bookingId: s
   useEffect(() => {
     if (!supabase || !bookingId) return;
     let mounted = true;
-    setLoading(true);
+    const loadingTimer = window.setTimeout(() => setLoading(true), 0);
 
     supabase
       .from("booking_tracking")
@@ -45,6 +45,7 @@ export function useBookingTracking(supabase: SupabaseClient | null, bookingId: s
 
     return () => {
       mounted = false;
+      window.clearTimeout(loadingTimer);
       supabase.removeChannel(channel);
     };
   }, [supabase, bookingId]);

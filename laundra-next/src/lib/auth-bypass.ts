@@ -1,20 +1,18 @@
 /**
- * When true: middleware does not redirect to `/auth`, and client pages show preview UI instead of blocking.
+ * When true: middleware does not redirect to `/login`, and some client pages show preview-only UI.
+ * **Default is off** — users must sign in; booking and dashboards are protected.
  *
- * - Explicit `NEXT_PUBLIC_LAUDRA_SKIP_AUTH=false` (or `0` / `no`) → always enforce auth (even in `npm run dev`).
- * - Explicit `true` / `1` / `yes` → always skip auth.
- * - Unset → in development (`next dev`), skip auth so all routes are browsable without signing in; in production builds, enforce auth.
+ * - `NEXT_PUBLIC_LAUDRA_SKIP_AUTH=true` / `1` / `yes` → skip middleware auth redirects (local UI testing only).
+ * - Anything else (unset, false, 0, no) → enforce auth in development and production.
  *
  * Database writes still require a signed-in user (Supabase RLS).
  */
 export function isAuthBypassEnabled(): boolean {
   const raw = process.env.NEXT_PUBLIC_LAUDRA_SKIP_AUTH?.trim().toLowerCase();
-  if (raw === "false" || raw === "0" || raw === "no") return false;
-  if (raw === "true" || raw === "1" || raw === "yes") return true;
-  return process.env.NODE_ENV === "development";
+  return raw === "true" || raw === "1" || raw === "yes";
 }
 
-/** Local only: stay on `/auth`, hide magic-link UI, disable auth redirects — use while building the auth page layout. */
+/** Local only: stay on `/login` / `/signup`, hide magic-link UI, no client redirects — use while building the auth page layout. */
 export function isAuthPageDevEnabled(): boolean {
   const raw = process.env.NEXT_PUBLIC_LAUDRA_AUTH_DEV?.trim().toLowerCase();
   return raw === "true" || raw === "1" || raw === "yes";

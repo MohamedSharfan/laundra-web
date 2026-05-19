@@ -2,17 +2,36 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { loginUrlForBooking } from "@/lib/marketing-links";
+import { useSupabaseUser } from "@/lib/supabase/session";
+
+type BusinessReview = {
+  id: string;
+  customer_name: string;
+  rating: number;
+  comment: string;
+};
 
 function formatLKR(amount: number) {
   return `Rs. ${amount.toLocaleString("en-LK")}`;
 }
 
 export default function Home() {
+  const { supabase, user, profile } = useSupabaseUser();
   const [tab, setTab] = useState<"customer" | "rider">("customer");
+  const [notifyEmail, setNotifyEmail] = useState("");
+  const [notifyMessage, setNotifyMessage] = useState<string | null>(null);
+  const [businessReviews, setBusinessReviews] = useState<BusinessReview[]>([]);
+  const [rating, setRating] = useState(5);
+  const [reviewText, setReviewText] = useState("");
+  const [reviewStatus, setReviewStatus] = useState<string | null>(null);
 
   const trackRef = useRef<HTMLDivElement | null>(null);
   const [slidePos, setSlidePos] = useState(0);
   const [visibleSlides, setVisibleSlides] = useState(3);
+  const isRider = profile?.role === "rider";
+  const showBooking = !isRider;
+  const showRiderCta = !user;
 
   const testimonials = useMemo(
     () => [
@@ -55,6 +74,43 @@ export default function Home() {
     [],
   );
 
+  const visibleReviews = useMemo(
+    () => [
+      ...businessReviews.map((r) => ({
+        stars: r.rating,
+        quote: `"${r.comment}"`,
+        name: r.customer_name,
+        role: "Customer review",
+      })),
+      ...testimonials,
+    ],
+    [businessReviews, testimonials],
+  );
+
+  useEffect(() => {
+    if (!supabase) return;
+
+    let cancelled = false;
+    supabase
+      .from("business_reviews")
+      .select("id,customer_name,rating,comment")
+      .eq("is_public", true)
+      .order("created_at", { ascending: false })
+      .limit(8)
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          console.warn("[laundra] business reviews unavailable:", error.message);
+          return;
+        }
+        setBusinessReviews((data ?? []) as BusinessReview[]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase]);
+
   useEffect(() => {
     const getVisibleSlides = () =>
       window.innerWidth <= 900 ? 1 : window.innerWidth <= 1200 ? 2 : 3;
@@ -65,12 +121,55 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    setSlidePos(0);
-  }, [visibleSlides]);
+    const timer = window.setTimeout(() => setSlidePos(0), 0);
+    return () => window.clearTimeout(timer);
+  }, [visibleSlides, visibleReviews.length]);
 
   const slideTestimonials = (dir: number) => {
-    const maxPos = Math.max(0, testimonials.length - visibleSlides);
+    const maxPos = Math.max(0, visibleReviews.length - visibleSlides);
     setSlidePos((p) => Math.max(0, Math.min(p + dir, maxPos)));
+  };
+
+  const submitReview = async () => {
+    setReviewStatus(null);
+    if (!user || !profile) {
+      setReviewStatus("Please sign in as a customer to leave a review.");
+      return;
+    }
+    if (profile.role !== "customer") {
+      setReviewStatus("Only customer accounts can leave business reviews.");
+      return;
+    }
+    if (!supabase) {
+      setReviewStatus("Reviews are not available right now.");
+      return;
+    }
+    if (reviewText.trim().length < 8) {
+      setReviewStatus("Write a short review before submitting.");
+      return;
+    }
+
+    const customerName = profile.full_name?.trim() || "Laundra customer";
+    const { data, error } = await supabase
+      .from("business_reviews")
+      .insert({
+        customer_id: user.id,
+        customer_name: customerName,
+        rating,
+        comment: reviewText.trim(),
+      })
+      .select("id,customer_name,rating,comment")
+      .single();
+
+    if (error) {
+      setReviewStatus("Review storage is not ready. Apply the latest Supabase patch and try again.");
+      return;
+    }
+
+    setBusinessReviews((prev) => [data as BusinessReview, ...prev]);
+    setReviewText("");
+    setRating(5);
+    setReviewStatus("Thanks. Your review is now listed.");
   };
 
   useEffect(() => {
@@ -80,7 +179,7 @@ export default function Home() {
     if (!cards.length) return;
     const cardWidth = cards[0].offsetWidth + 24;
     track.style.transform = `translateX(-${slidePos * cardWidth}px)`;
-  }, [slidePos]);
+  }, [slidePos, visibleReviews.length]);
 
   const [openFaq, setOpenFaq] = useState<number | null>(0);
 
@@ -105,32 +204,36 @@ export default function Home() {
               deliver — with precision you can count on.
             </p>
             <div className="hero-actions">
-              <Link className="btn-yellow" href="/booking?package=basic">
-                <span
-                  className="material-symbols-outlined"
-                  style={{
-                    verticalAlign: "middle",
-                    marginRight: 8,
-                    fontSize: "20px",
-                  }}
-                >
-                  local_laundry_service
-                </span>
-                Book Pickup
-              </Link>
-              <Link className="btn-black" href="/login/rider">
-                <span
-                  className="material-symbols-outlined"
-                  style={{
-                    verticalAlign: "middle",
-                    marginRight: 8,
-                    fontSize: "20px",
-                  }}
-                >
-                  two_wheeler
-                </span>
-                Become a Rider
-              </Link>
+              {showBooking && (
+                <Link className="btn-yellow" href={loginUrlForBooking("basic")} prefetch={false}>
+                  <span
+                    className="material-symbols-outlined"
+                    style={{
+                      verticalAlign: "middle",
+                      marginRight: 8,
+                      fontSize: "20px",
+                    }}
+                  >
+                    local_laundry_service
+                  </span>
+                  Book Pickup
+                </Link>
+              )}
+              {showRiderCta && (
+                <Link className="btn-black" href="/signup?role=rider">
+                  <span
+                    className="material-symbols-outlined"
+                    style={{
+                      verticalAlign: "middle",
+                      marginRight: 8,
+                      fontSize: "20px",
+                    }}
+                  >
+                    two_wheeler
+                  </span>
+                  Become a Rider
+                </Link>
+              )}
             </div>
 
             <div className="hero-stats animate-in">
@@ -516,8 +619,8 @@ export default function Home() {
                 <span className="material-symbols-outlined process-icon">app_registration</span>
                 <h3 className="process-step-title">Sign Up</h3>
                 <p className="process-step-desc">
-                  Register as a Laundra rider in minutes. Pass a quick verification check and set
-                  up your profile with availability windows. Start earning today.
+                  Register as a Laundra rider in minutes. Set up your profile with availability
+                  windows and start accepting jobs today.
                 </p>
               </div>
               <div className="process-step">
@@ -674,9 +777,11 @@ export default function Home() {
                   <span className="material-symbols-outlined">check</span>Premium detergents
                 </li>
               </ul>
-              <Link className="btn-primary" href="/booking?package=basic">
-                Book Basic
-              </Link>
+              {showBooking && (
+                <Link className="btn-primary" href={loginUrlForBooking("basic")} prefetch={false}>
+                  Book Basic
+                </Link>
+              )}
             </div>
 
             <div className="pricing-card featured">
@@ -701,9 +806,11 @@ export default function Home() {
                   <span className="material-symbols-outlined">check</span>Hypoallergenic available
                 </li>
               </ul>
-              <Link className="btn-yellow" href="/booking?package=pro" style={{ fontSize: 14 }}>
-                Book Pro
-              </Link>
+              {showBooking && (
+                <Link className="btn-yellow" href={loginUrlForBooking("pro")} style={{ fontSize: 14 }} prefetch={false}>
+                  Book Pro
+                </Link>
+              )}
             </div>
 
             <div className="pricing-card">
@@ -723,9 +830,11 @@ export default function Home() {
                   <span className="material-symbols-outlined">check</span>Inspected + tagged
                 </li>
               </ul>
-              <Link className="btn-primary" href="/booking?package=luxury">
-                Book Luxury
-              </Link>
+              {showBooking && (
+                <Link className="btn-primary" href={loginUrlForBooking("luxury")} prefetch={false}>
+                  Book Luxury
+                </Link>
+              )}
             </div>
           </div>
         </div>
@@ -743,7 +852,7 @@ export default function Home() {
 
           <div className="testimonial-slider animate-in">
             <div className="testimonial-track" id="testimonialTrack" ref={trackRef}>
-              {testimonials.map((t, idx) => (
+              {visibleReviews.map((t, idx) => (
                 <div className="testimonial-card" key={idx}>
                   <div className="testimonial-stars">
                     {Array.from({ length: t.stars }).map((_, i) => (
@@ -785,8 +894,57 @@ export default function Home() {
                 alignSelf: "center",
               }}
             >
-              {slidePos + 1} / {testimonials.length}
+              {slidePos + 1} / {visibleReviews.length}
             </div>
+          </div>
+
+          <div className="config-card animate-in" style={{ marginTop: 28 }}>
+            <div className="config-title">Rate Laundra</div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+              {[1, 2, 3, 4, 5].map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => setRating(n)}
+                  aria-label={`${n} stars`}
+                  style={{
+                    border: "3px solid var(--black)",
+                    background: n <= rating ? "var(--yellow)" : "white",
+                    boxShadow: "3px 3px 0 0 var(--black)",
+                    width: 42,
+                    height: 42,
+                    cursor: "pointer",
+                  }}
+                >
+                  <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>
+                    star
+                  </span>
+                </button>
+              ))}
+            </div>
+            <textarea
+              value={reviewText}
+              onChange={(e) => setReviewText(e.target.value)}
+              placeholder="Tell us about your experience"
+              style={{
+                width: "100%",
+                minHeight: 96,
+                border: "3px solid var(--black)",
+                padding: "12px 14px",
+                fontFamily: "Inter",
+                fontWeight: 600,
+                resize: "vertical",
+                marginBottom: 14,
+              }}
+            />
+            <button className="btn-primary" type="button" onClick={() => void submitReview()}>
+              Submit rating
+            </button>
+            {reviewStatus && (
+              <div style={{ marginTop: 12, fontFamily: "Inter", fontSize: 13, fontWeight: 700 }}>
+                {reviewStatus}
+              </div>
+            )}
           </div>
         </div>
       </section>
@@ -808,7 +966,7 @@ export default function Home() {
             },
             {
               q: "How do I become a rider?",
-              a: 'Tap "Become a Rider" and complete registration. After verification (typically within 24 hours), you’ll access the Rider Portal to start accepting jobs.',
+              a: 'Tap "Become a Rider" and create a rider account. If you are already a customer, confirm rider mode from the rider portal prompt.',
             },
             {
               q: "Do you use LKR pricing only?",
@@ -851,9 +1009,28 @@ export default function Home() {
           </div>
           <div className="animate-in">
             <div className="email-bar">
-              <input placeholder="EMAIL" aria-label="Email" />
-              <button type="button">Notify Me</button>
+              <input
+                placeholder="EMAIL"
+                aria-label="Email"
+                value={notifyEmail}
+                onChange={(e) => setNotifyEmail(e.target.value)}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  setNotifyMessage(
+                    notifyEmail.trim() ? "Thanks. We saved your interest." : "Enter your email first.",
+                  );
+                }}
+              >
+                Notify Me
+              </button>
             </div>
+            {notifyMessage && (
+              <div style={{ marginTop: 10, color: "rgba(255,255,255,0.82)", fontSize: 13, fontWeight: 700 }}>
+                {notifyMessage}
+              </div>
+            )}
             <div style={{ marginTop: 16, color: "rgba(255,255,255,0.7)", fontSize: 13 }}>
               Delivery fee starts at {formatLKR(1000)} depending on location.
             </div>
@@ -875,14 +1052,40 @@ export default function Home() {
           <div>
             <div className="footer-col-title">Product</div>
             <ul className="footer-links">
+              {showBooking && (
+                <li>
+                  <Link href={loginUrlForBooking("basic")} prefetch={false}>
+                    Book Pickup
+                  </Link>
+                </li>
+              )}
+              {!user && (
+                <li>
+                  <Link href="/signup?role=rider">Rider Portal</Link>
+                </li>
+              )}
+              {profile?.role === "rider" && (
+                <li>
+                  <Link href="/rider">Rider Portal</Link>
+                </li>
+              )}
+              {profile?.role === "customer" && (
+                <li>
+                  <Link href="/customer">My Orders</Link>
+                </li>
+              )}
+              {!user && (
+                <>
+                  <li>
+                    <Link href="/login">Log in</Link>
+                  </li>
+                  <li>
+                    <Link href="/signup">Sign up</Link>
+                  </li>
+                </>
+              )}
               <li>
-                <Link href="/booking?package=basic">Book Pickup</Link>
-              </li>
-              <li>
-                <Link href="/rider">Rider Portal</Link>
-              </li>
-              <li>
-                <a href="/#pricing">Pricing</a>
+                <Link href="/#pricing">Pricing</Link>
               </li>
             </ul>
           </div>
@@ -890,13 +1093,13 @@ export default function Home() {
             <div className="footer-col-title">Company</div>
             <ul className="footer-links">
               <li>
-                <a href="#">About Us</a>
+                <Link href="/#process">About Us</Link>
               </li>
               <li>
-                <a href="#">Careers</a>
+                <Link href="/login?switch=rider">Careers</Link>
               </li>
               <li>
-                <a href="#">Press Kit</a>
+                <Link href="/#features">Press Kit</Link>
               </li>
             </ul>
           </div>
@@ -904,13 +1107,13 @@ export default function Home() {
             <div className="footer-col-title">Support</div>
             <ul className="footer-links">
               <li>
-                <a href="#">Help Center</a>
+                <Link href="/#faq">Help Center</Link>
               </li>
               <li>
-                <a href="#">Privacy</a>
+                <Link href="/#faq">Privacy</Link>
               </li>
               <li>
-                <a href="#">Terms</a>
+                <Link href="/#faq">Terms</Link>
               </li>
             </ul>
           </div>

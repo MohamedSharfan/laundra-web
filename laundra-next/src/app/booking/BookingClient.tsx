@@ -5,10 +5,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { z } from "zod";
 import LaundraRouteLoader from "@/components/LaundraRouteLoader";
-import { isAuthBypassEnabled } from "@/lib/auth-bypass";
 import { useSupabaseUser } from "@/lib/supabase/session";
 
 type Service = "wash" | "iron";
+type PaymentMethod = "cash_on_delivery" | "card";
 
 function formatLKR(amount: number) {
   return `Rs. ${amount.toLocaleString("en-LK")}`;
@@ -37,6 +37,13 @@ export default function BookingClient() {
   });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash_on_delivery");
+  const [cardName, setCardName] = useState("");
+  const [cardNumber, setCardNumber] = useState("");
+  const [cardExpiry, setCardExpiry] = useState("");
+  const [cardCvc, setCardCvc] = useState("");
+  const [paymentStage, setPaymentStage] = useState<"idle" | "processing" | "paid">("idle");
+  const [paymentReceipt, setPaymentReceipt] = useState<string | null>(null);
 
   const [address, setAddress] = useState("NO. 12, GALLE ROAD, COLOMBO 03");
   const [scheduledDate, setScheduledDate] = useState(() => {
@@ -48,11 +55,12 @@ export default function BookingClient() {
   });
   const [timeWindow, setTimeWindow] = useState("09:00 – 11:00");
   const [city] = useState("Colombo");
+  const invoiceNumber = useMemo(() => `LND-${scheduledDate.replaceAll("-", "")}-${weight}${initialPackage.slice(0, 2).toUpperCase()}`, [scheduledDate, weight, initialPackage]);
 
   useEffect(() => {
-    if (authLoading || isAuthBypassEnabled()) return;
+    if (authLoading) return;
     if (!user) {
-      router.replace(`/login/customer?next=${encodeURIComponent(bookingReturnPath)}`);
+      router.replace(`/login?next=${encodeURIComponent(bookingReturnPath)}`);
       return;
     }
     if (profile?.role === "rider") {
@@ -60,9 +68,7 @@ export default function BookingClient() {
     }
   }, [authLoading, user, profile?.role, router, bookingReturnPath]);
 
-  const bypass = isAuthBypassEnabled();
-  const authBlocked =
-    authLoading || (!user && !bypass) || (profile?.role === "rider" && !bypass);
+  const authBlocked = authLoading || !user || profile?.role === "rider";
 
   const pricing = useMemo(() => {
     const basePerKg = initialPackage === "pro" ? 650 : service === "wash" ? 450 : 250; // LKR per kg
@@ -86,6 +92,8 @@ export default function BookingClient() {
       serviceName,
       details: `${serviceName} · ${weight}kg` + (addonNames.length ? ` · ${addonNames.join(", ")}` : ""),
       deliveryFee,
+      subtotal: total - deliveryFee,
+      addonNames,
     };
   }, [service, weight, addons, initialPackage]);
 
@@ -96,6 +104,19 @@ export default function BookingClient() {
   const adjustWeight = (delta: number) => {
     const next = Math.max(1, Math.min(50, weight + delta));
     setWeight(next);
+  };
+
+  const clearPaymentResult = () => {
+    setPaymentStage("idle");
+    setPaymentReceipt(null);
+  };
+
+  const validateCardPayment = () => {
+    const digits = cardNumber.replace(/\D/g, "");
+    if (!cardName.trim() || digits.length < 12 || !cardExpiry.includes("/") || cardCvc.replace(/\D/g, "").length < 3) {
+      return "Complete the simulated card payment fields before confirming.";
+    }
+    return null;
   };
 
   const bookingSchema = useMemo(
@@ -115,13 +136,7 @@ export default function BookingClient() {
     if (authLoading) return;
 
     if (!user) {
-      if (bypass) {
-        setSaveError(
-          "Auth bypass is on — unset NEXT_PUBLIC_LAUDRA_SKIP_AUTH and sign in to confirm bookings.",
-        );
-        return;
-      }
-      router.push(`/login/customer?next=${encodeURIComponent(bookingReturnPath)}`);
+      router.push(`/login?next=${encodeURIComponent(bookingReturnPath)}`);
       return;
     }
     if (!supabase) {
@@ -143,8 +158,23 @@ export default function BookingClient() {
 
     setSaving(true);
     try {
+      let simulatedReceipt = paymentReceipt;
+      if (paymentMethod === "card" && paymentStage !== "paid") {
+        const cardError = validateCardPayment();
+        if (cardError) {
+          setSaveError(cardError);
+          return;
+        }
+        setPaymentStage("processing");
+        await new Promise((resolve) => window.setTimeout(resolve, 1100));
+        simulatedReceipt = `SIM-${Date.now().toString().slice(-8)}`;
+        setPaymentReceipt(simulatedReceipt);
+        setPaymentStage("paid");
+      }
+
       const packageId = initialPackage;
       const serviceType = packageId === "luxury" ? "dry_clean" : service === "wash" ? "wash" : "iron";
+      const cardLast4 = paymentMethod === "card" ? cardNumber.replace(/\D/g, "").slice(-4) : null;
 
       const { data: inserted, error } = await supabase
         .from("bookings")
@@ -154,7 +184,16 @@ export default function BookingClient() {
           service_type: serviceType,
           weight_kg: packageId === "luxury" ? null : weight,
           item_count: packageId === "luxury" ? Math.max(1, Math.round(weight / 2)) : null,
-          addons,
+          addons: {
+            ...addons,
+            checkout: {
+              payment_method: paymentMethod,
+              invoice_number: invoiceNumber,
+              payment_status: paymentMethod === "card" ? "paid" : "pending",
+              receipt_number: simulatedReceipt,
+              card_last4: cardLast4,
+            },
+          },
           pickup_address: address,
           pickup_city: city,
           scheduled_date: scheduledDate,
@@ -167,6 +206,31 @@ export default function BookingClient() {
 
       if (error) throw error;
 
+      const { error: paymentError } = await supabase.from("payments").insert({
+        booking_id: inserted.id,
+        customer_id: user.id,
+        amount_lkr: pricing.total,
+        status: paymentMethod === "card" ? "paid" : "pending",
+        provider: paymentMethod === "card" ? "simulated_card" : "cash_on_delivery",
+        method: paymentMethod,
+        invoice: {
+          invoice_number: invoiceNumber,
+          receipt_number: simulatedReceipt,
+          service: pricing.serviceName,
+          package_id: packageId,
+          details: pricing.details,
+          subtotal_lkr: pricing.subtotal,
+          delivery_fee_lkr: pricing.deliveryFee,
+          total_lkr: pricing.total,
+          payment_status: paymentMethod === "card" ? "paid" : "pending",
+          card_last4: cardLast4,
+        },
+      });
+
+      if (paymentError) {
+        console.warn("[laundra] payment row was not created:", paymentError.message);
+      }
+
       await supabase.from("booking_events").insert({
         booking_id: inserted.id,
         status: "booking_placed",
@@ -175,8 +239,8 @@ export default function BookingClient() {
       });
 
       router.replace(`/customer?new=${inserted.id}`);
-    } catch (e: any) {
-      setSaveError(e?.message ?? "Booking failed. Please try again.");
+    } catch (e: unknown) {
+      setSaveError(e instanceof Error ? e.message : "Booking failed. Please try again.");
     } finally {
       setSaving(false);
     }
@@ -192,24 +256,6 @@ export default function BookingClient() {
 
   return (
     <div id="page-booking" className="page-section active">
-      {bypass && (
-        <div
-          style={{
-            margin: "0 auto",
-            maxWidth: 900,
-            padding: "12px 16px",
-            borderBottom: "3px solid var(--black)",
-            background: "var(--yellow)",
-            fontFamily: "Space Grotesk",
-            fontWeight: 800,
-            fontSize: 11,
-            textTransform: "uppercase",
-            letterSpacing: "0.06em",
-          }}
-        >
-          Preview mode: sign-in gate disabled · bookings won&apos;t save until you authenticate
-        </div>
-      )}
       <div className="dashboard-layout">
         <aside className="sidebar">
           <div className="sidebar-brand">LAUNDRA</div>
@@ -222,7 +268,7 @@ export default function BookingClient() {
           <Link className="sidebar-link" href="/customer#customer-orders">
             <span className="material-symbols-outlined">map</span> Track Order
           </Link>
-          <Link className="sidebar-link" href="/customer#customer-orders">
+          <Link className="sidebar-link" href="/customer#customer-history">
             <span className="material-symbols-outlined">history</span> History
           </Link>
           <Link className="sidebar-link" href="/customer#customer-settings">
@@ -277,7 +323,7 @@ export default function BookingClient() {
             </div>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 360px", gap: 24, marginBottom: 32 }}>
+          <div className="booking-config-grid" style={{ marginBottom: 32 }}>
             <div className="config-card">
               <div className="config-title">Estimated Weight</div>
               <div className="weight-display">
@@ -388,7 +434,7 @@ export default function BookingClient() {
 
           <div className="config-card" ref={pickupScheduleRef} id="pickup-schedule-section">
             <div className="config-title">Pickup Details</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
+            <div className="booking-pickup-grid">
               <div>
                 <label
                   style={{
@@ -493,6 +539,186 @@ export default function BookingClient() {
             </div>
           </div>
 
+          <div className="config-card" style={{ marginBottom: 32 }}>
+            <div className="config-title">Payment</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
+              {([
+                ["cash_on_delivery", "Cash on delivery", "Pay the rider after pickup confirmation."],
+                ["card", "Card payment", "Pay by card terminal or secure payment link."],
+              ] as const).map(([value, title, desc]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => {
+                    setPaymentMethod(value);
+                    clearPaymentResult();
+                  }}
+                  style={{
+                    border: "3px solid var(--black)",
+                    background: paymentMethod === value ? "var(--yellow)" : "white",
+                    boxShadow: "4px 4px 0 0 var(--black)",
+                    padding: "14px 16px",
+                    textAlign: "left",
+                    cursor: "pointer",
+                  }}
+                >
+                  <div style={{ fontFamily: "Space Grotesk", fontWeight: 900, textTransform: "uppercase", fontSize: 12 }}>
+                    {title}
+                  </div>
+                  <div style={{ marginTop: 6, fontFamily: "Inter", fontSize: 13, lineHeight: 1.45, opacity: 0.78 }}>
+                    {desc}
+                  </div>
+                </button>
+              ))}
+            </div>
+            {paymentMethod === "card" && (
+              <div className={`sim-payment-panel ${paymentStage === "paid" ? "paid" : ""}`}>
+                <div className="sim-payment-rail">
+                  <span className="material-symbols-outlined">encrypted</span>
+                  <div>
+                    <strong>Simulated online payment</strong>
+                    <p>No real card is charged. This creates a paid invoice and receipt for testing.</p>
+                  </div>
+                </div>
+                <div className="profile-settings-grid" style={{ marginTop: 16 }}>
+                  <input
+                    value={cardName}
+                    onChange={(e) => {
+                      setCardName(e.target.value);
+                      clearPaymentResult();
+                    }}
+                    placeholder="Name on card"
+                    autoComplete="cc-name"
+                    style={{
+                      width: "100%",
+                      border: "3px solid var(--black)",
+                      padding: "12px 14px",
+                      fontFamily: "Inter",
+                      fontWeight: 700,
+                      fontSize: 14,
+                    }}
+                  />
+                  <input
+                    value={cardNumber}
+                    onChange={(e) => {
+                      setCardNumber(e.target.value);
+                      clearPaymentResult();
+                    }}
+                    placeholder="4242 4242 4242 4242"
+                    inputMode="numeric"
+                    autoComplete="cc-number"
+                    style={{
+                      width: "100%",
+                      border: "3px solid var(--black)",
+                      padding: "12px 14px",
+                      fontFamily: "Inter",
+                      fontWeight: 700,
+                      fontSize: 14,
+                    }}
+                  />
+                  <input
+                    value={cardExpiry}
+                    onChange={(e) => {
+                      setCardExpiry(e.target.value);
+                      clearPaymentResult();
+                    }}
+                    placeholder="MM/YY"
+                    autoComplete="cc-exp"
+                    style={{
+                      width: "100%",
+                      border: "3px solid var(--black)",
+                      padding: "12px 14px",
+                      fontFamily: "Inter",
+                      fontWeight: 700,
+                      fontSize: 14,
+                    }}
+                  />
+                  <input
+                    value={cardCvc}
+                    onChange={(e) => {
+                      setCardCvc(e.target.value);
+                      clearPaymentResult();
+                    }}
+                    placeholder="CVC"
+                    inputMode="numeric"
+                    autoComplete="cc-csc"
+                    style={{
+                      width: "100%",
+                      border: "3px solid var(--black)",
+                      padding: "12px 14px",
+                      fontFamily: "Inter",
+                      fontWeight: 700,
+                      fontSize: 14,
+                    }}
+                  />
+                </div>
+                <div className="sim-payment-status">
+                  {paymentStage === "processing" && (
+                    <>
+                      <span className="loading-dots"><span /><span /><span /></span>
+                      Processing simulated payment
+                    </>
+                  )}
+                  {paymentStage === "paid" && (
+                    <>
+                      <span className="material-symbols-outlined">verified</span>
+                      Paid · {paymentReceipt}
+                    </>
+                  )}
+                  {paymentStage === "idle" && (
+                    <>
+                      <span className="material-symbols-outlined">credit_card</span>
+                      Payment runs when booking is confirmed
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="config-card" style={{ marginBottom: 32, background: "#fffef5" }}>
+            <div className="config-title">Mini invoice</div>
+            <div style={{ display: "grid", gap: 10, fontFamily: "Inter", fontSize: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                <strong>Invoice</strong>
+                <span>{invoiceNumber}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                <span>{pricing.serviceName}</span>
+                <strong>{formatLKR(pricing.subtotal)}</strong>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                <span>Delivery</span>
+                <strong>{formatLKR(pricing.deliveryFee)}</strong>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                <span>Payment</span>
+                <strong>{paymentMethod === "card" ? "Card payment" : "Cash on delivery"}</strong>
+              </div>
+              {paymentMethod === "card" && paymentReceipt && (
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                  <span>Receipt</span>
+                  <strong>{paymentReceipt}</strong>
+                </div>
+              )}
+              <div
+                style={{
+                  borderTop: "3px solid var(--black)",
+                  paddingTop: 12,
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  fontFamily: "Space Grotesk",
+                  fontWeight: 900,
+                  textTransform: "uppercase",
+                }}
+              >
+                <span>Total</span>
+                <span>{formatLKR(pricing.total)}</span>
+              </div>
+            </div>
+          </div>
+
           <div className="order-summary">
             <div>
               <div className="order-total-label">Total Estimate</div>
@@ -533,7 +759,7 @@ export default function BookingClient() {
                 >
                   check_circle
                 </span>
-                {saving ? "Confirming..." : "Confirm Booking"}
+                {saving ? (paymentMethod === "card" ? "Processing..." : "Confirming...") : "Confirm Booking"}
               </button>
             </div>
           </div>
@@ -563,4 +789,3 @@ export default function BookingClient() {
     </div>
   );
 }
-

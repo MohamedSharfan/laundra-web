@@ -1,9 +1,9 @@
 "use client";
 
-import { createClient } from "@supabase/supabase-js";
+import { createBrowserClient } from "@supabase/ssr";
 import { getPublicEnv } from "@/lib/env";
 
-let cachedClient: ReturnType<typeof createClient> | null = null;
+let cachedClient: ReturnType<typeof createBrowserClient> | null = null;
 
 export function createSupabaseBrowserClient() {
   if (cachedClient) return cachedClient;
@@ -15,7 +15,7 @@ export function createSupabaseBrowserClient() {
     );
   }
 
-  cachedClient = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
+  cachedClient = createBrowserClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
     auth: {
       persistSession: true,
       autoRefreshToken: true,

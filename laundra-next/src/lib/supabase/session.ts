@@ -17,23 +17,25 @@ async function ensureRiderRow(supabase: SupabaseClient, userId: string) {
 }
 
 export function useSupabaseUser() {
-  const [supabase, setSupabase] = useState<SupabaseClient | null>(null);
+  const [clientInit] = useState(() => {
+    try {
+      return {
+        supabase: createSupabaseBrowserClient() as SupabaseClient,
+        envError: null as string | null,
+      };
+    } catch (e: unknown) {
+      return {
+        supabase: null,
+        envError: e instanceof Error ? e.message : "Supabase is not configured.",
+      };
+    }
+  });
+  const supabase = clientInit.supabase;
   const [user, setUser] = useState<User | null>(null);
-  const [authResolved, setAuthResolved] = useState(false);
+  const [authResolved, setAuthResolved] = useState(!supabase);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
-  const [envError, setEnvError] = useState<string | null>(null);
-
-  useEffect(() => {
-    try {
-      setSupabase(createSupabaseBrowserClient());
-      setEnvError(null);
-    } catch (e: unknown) {
-      setEnvError(e instanceof Error ? e.message : "Supabase is not configured.");
-      setSupabase(null);
-      setAuthResolved(true);
-    }
-  }, []);
+  const envError = clientInit.envError;
 
   useEffect(() => {
     if (!supabase) return;
@@ -64,9 +66,11 @@ export function useSupabaseUser() {
     if (!supabase) return;
 
     if (!user) {
-      setProfile(null);
-      setProfileLoading(false);
-      return;
+      const timer = window.setTimeout(() => {
+        setProfile(null);
+        setProfileLoading(false);
+      }, 0);
+      return () => window.clearTimeout(timer);
     }
 
     let mounted = true;
@@ -74,7 +78,7 @@ export function useSupabaseUser() {
     const syncProfile = async () => {
       setProfileLoading(true);
 
-      const meta = user.user_metadata as { role?: string; full_name?: string } | undefined;
+      const meta = user.user_metadata as { role?: string; full_name?: string; phone?: string } | undefined;
       const metaRole =
         meta?.role === "rider" || meta?.role === "customer" || meta?.role === "admin"
           ? meta.role
@@ -119,6 +123,7 @@ export function useSupabaseUser() {
             id: user.id,
             role,
             full_name: meta?.full_name ?? null,
+            phone: meta?.phone ?? null,
           })
           .select("id,role,full_name,phone")
           .single();
@@ -129,27 +134,18 @@ export function useSupabaseUser() {
           resolved = inserted as UserProfile;
           if (resolved.role === "rider") await ensureRiderRow(supabase, user.id);
         }
-      } else if (
-        desiredRole &&
-        desiredRole !== resolved.role &&
-        !(resolved.role === "rider" && desiredRole === "customer") &&
-        !(resolved.role === "admin")
-      ) {
-        const { data: updated, error: updateError } = await supabase
+      } else if (resolved.role === "rider") {
+        await ensureRiderRow(supabase, user.id);
+      }
+
+      if (resolved && meta?.phone && !resolved.phone) {
+        const { data: patched } = await supabase
           .from("profiles")
-          .update({ role: desiredRole })
+          .update({ phone: meta.phone })
           .eq("id", user.id)
           .select("id,role,full_name,phone")
           .single();
-
-        if (!mounted) return;
-
-        if (!updateError && updated) {
-          resolved = updated as UserProfile;
-          if (resolved.role === "rider") await ensureRiderRow(supabase, user.id);
-        }
-      } else if (resolved.role === "rider") {
-        await ensureRiderRow(supabase, user.id);
+        if (patched) resolved = patched as UserProfile;
       }
 
       if (typeof window !== "undefined") {
